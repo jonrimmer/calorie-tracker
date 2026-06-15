@@ -45,6 +45,7 @@ export interface LocalMeta {
   spreadsheetId?: string;
   lastSyncAt?: ISODateTime;
   localOnly?: boolean;
+  pendingSync?: boolean;
 }
 
 export interface SyncRecord {

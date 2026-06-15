@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { TrackerShell } from "./components/TrackerShell";
 import { createDemoData } from "./lib/demoData";
 import { DEFAULT_SETTINGS } from "./lib/nutrition";
-import { mergeTrackerData } from "./lib/sync";
 import {
   getLocalMeta,
   getTrackerData,
@@ -19,6 +18,7 @@ import {
   writeSheetData,
   GoogleApiError
 } from "./services/google";
+import { syncTrackerData } from "./services/syncTracker";
 import type {
   FavouriteDraft,
   FavouriteMeal,
@@ -71,7 +71,13 @@ export default function App() {
       setSyncState({
         phase: storedMeta.spreadsheetId || storedMeta.localOnly ? "ready" : "needs-setup",
         lastSyncAt: storedMeta.lastSyncAt,
-        message: storedMeta.localOnly ? "Local test mode" : storedMeta.lastSyncAt ? "Synced" : undefined
+        message: storedMeta.localOnly
+          ? "Local test mode"
+          : storedMeta.pendingSync
+            ? "Changes pending sync."
+            : storedMeta.lastSyncAt
+              ? "Synced"
+              : undefined
       });
     }
 
@@ -118,6 +124,26 @@ export default function App() {
     await saveLocalMeta(nextMeta);
   }, []);
 
+  const noteLocalChange = useCallback(
+    async (message: string) => {
+      if (meta.spreadsheetId && !meta.localOnly) {
+        await persistMeta({ ...meta, pendingSync: true });
+      }
+
+      setSyncState((current) => ({
+        ...current,
+        phase: navigator.onLine ? "ready" : "offline",
+        message:
+          meta.spreadsheetId && !meta.localOnly
+            ? navigator.onLine
+              ? `${message} Pending sync.`
+              : "Offline changes saved locally."
+            : message
+      }));
+    },
+    [meta, persistMeta]
+  );
+
   const getGoogleToken = useCallback(
     async (prompt: "" | "consent") => {
       if (accessToken && prompt !== "consent") {
@@ -141,9 +167,9 @@ export default function App() {
       const nextData = { ...data, settings };
       setData(nextData);
       await saveSettingsRecord(settings);
-      setSyncState((current) => ({ ...current, phase: navigator.onLine ? "ready" : "offline", message: "Targets saved." }));
+      await noteLocalChange("Targets saved.");
     },
-    [data]
+    [data, noteLocalChange]
   );
 
   const saveMeal = useCallback(
@@ -163,9 +189,9 @@ export default function App() {
 
       setData(nextData);
       await saveMealRecord(meal);
-      setSyncState((current) => ({ ...current, phase: navigator.onLine ? "ready" : "offline", message: "Meal saved." }));
+      await noteLocalChange("Meal saved.");
     },
-    [data]
+    [data, noteLocalChange]
   );
 
   const deleteMeal = useCallback(
@@ -179,9 +205,9 @@ export default function App() {
 
       setData(nextData);
       await saveMealRecord(deleted);
-      setSyncState((current) => ({ ...current, phase: navigator.onLine ? "ready" : "offline", message: "Meal deleted." }));
+      await noteLocalChange("Meal deleted.");
     },
-    [data]
+    [data, noteLocalChange]
   );
 
   const saveFavourite = useCallback(
@@ -203,10 +229,10 @@ export default function App() {
 
       setData(nextData);
       await saveFavouriteRecord(favourite);
-      setSyncState((current) => ({ ...current, phase: navigator.onLine ? "ready" : "offline", message: "Favourite saved." }));
+      await noteLocalChange("Favourite saved.");
       return favourite;
     },
-    [data]
+    [data, noteLocalChange]
   );
 
   const deleteFavourite = useCallback(
@@ -220,9 +246,9 @@ export default function App() {
 
       setData(nextData);
       await saveFavouriteRecord(deleted);
-      setSyncState((current) => ({ ...current, phase: navigator.onLine ? "ready" : "offline", message: "Favourite deleted." }));
+      await noteLocalChange("Favourite deleted.");
     },
-    [data]
+    [data, noteLocalChange]
   );
 
   const performGoogleSync = useCallback(
@@ -233,18 +259,22 @@ export default function App() {
       }
 
       setSyncState({ phase: "syncing", message: "Syncing..." });
-      const token = await getGoogleToken(prompt);
-      const resolvedSpreadsheetId = spreadsheetId ?? meta.spreadsheetId ?? (await ensureTrackerSpreadsheet(token));
-      const remoteData = await readSheetData(token, resolvedSpreadsheetId);
-      const merged = mergeTrackerData(data, remoteData);
-      await writeSheetData(token, resolvedSpreadsheetId, merged);
+      const result = await syncTrackerData({
+        spreadsheetId,
+        prompt,
+        meta,
+        getGoogleToken,
+        getLocalData: getTrackerData,
+        ensureSpreadsheet: ensureTrackerSpreadsheet,
+        readRemoteData: readSheetData,
+        writeRemoteData: writeSheetData
+      });
 
-      const lastSyncAt = new Date().toISOString();
-      await persistAll(merged);
-      await persistMeta({ spreadsheetId: resolvedSpreadsheetId, lastSyncAt, localOnly: false });
-      setSyncState({ phase: "synced", message: "Synced", lastSyncAt });
+      await persistAll(result.data);
+      await persistMeta(result.meta);
+      setSyncState({ phase: "synced", message: "Synced", lastSyncAt: result.meta.lastSyncAt });
     },
-    [data, getGoogleToken, meta.lastSyncAt, meta.spreadsheetId, persistAll, persistMeta]
+    [getGoogleToken, meta, persistAll, persistMeta]
   );
 
   const setupGoogle = useCallback(async () => {
@@ -269,14 +299,29 @@ export default function App() {
   }, [meta.lastSyncAt, meta.localOnly, meta.spreadsheetId, performGoogleSync]);
 
   useEffect(() => {
-    if (!isOnline || !meta.spreadsheetId || meta.localOnly || !accessToken || syncState.phase !== "offline") {
+    if (!isOnline || !meta.spreadsheetId || meta.localOnly || !meta.pendingSync || !accessToken || syncState.phase === "syncing") {
       return;
     }
 
-    performGoogleSync(meta.spreadsheetId).catch((error) => {
-      setSyncState({ phase: "error", message: errorMessage(error), lastSyncAt: meta.lastSyncAt });
-    });
-  }, [accessToken, isOnline, meta.lastSyncAt, meta.localOnly, meta.spreadsheetId, performGoogleSync, syncState.phase]);
+    const timeoutId = window.setTimeout(() => {
+      performGoogleSync(meta.spreadsheetId).catch((error) => {
+        setSyncState({ phase: "error", message: errorMessage(error), lastSyncAt: meta.lastSyncAt });
+      });
+    }, 800);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    accessToken,
+    isOnline,
+    meta.lastSyncAt,
+    meta.localOnly,
+    meta.pendingSync,
+    meta.spreadsheetId,
+    performGoogleSync,
+    syncState.phase
+  ]);
 
   const startLocalMode = useMemo(() => {
     if (!import.meta.env.DEV) {
@@ -285,7 +330,7 @@ export default function App() {
 
     return async () => {
       const demoData = createDemoData();
-      const nextMeta = { localOnly: true };
+      const nextMeta = { localOnly: true, pendingSync: false };
       await saveTrackerData(demoData);
       await persistMeta(nextMeta);
       setData(demoData);
