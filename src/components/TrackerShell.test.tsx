@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TrackerShell, type TrackerShellProps } from "./TrackerShell";
-import type { FavouriteDraft, FavouriteMeal, Meal, MealDraft, SettingsDraft, TrackerData } from "../types";
+import type { FavouriteDraft, FavouriteMeal, Meal, MealDraft, SettingsDraft, SyncState, TrackerData } from "../types";
 
 const selectedDate = "2026-06-15";
 const now = "2026-06-15T10:00:00.000Z";
@@ -22,20 +22,26 @@ function makeData(): TrackerData {
   };
 }
 
-function Harness() {
+function Harness({
+  syncState = { phase: "ready", message: "Ready" },
+  onSync = async () => undefined
+}: {
+  syncState?: SyncState;
+  onSync?: () => Promise<void>;
+} = {}) {
   const [data, setData] = useState<TrackerData>(makeData());
   const [date, setDate] = useState(selectedDate);
 
   const props: TrackerShellProps = {
     data,
     selectedDate: date,
-    syncState: { phase: "ready", message: "Ready" },
+    syncState,
     googleClientConfigured: true,
     isConfigured: true,
     isOnline: true,
     onSelectDate: setDate,
     onSetupGoogle: async () => undefined,
-    onSync: async () => undefined,
+    onSync,
     onSaveSettings: async (settings: SettingsDraft) => {
       setData((current) => ({
         ...current,
@@ -165,5 +171,17 @@ describe("TrackerShell", () => {
     fireEvent.change(screen.getByLabelText("Fat"), { target: { value: "10" } });
 
     expect(screen.getByText("170 kcal from macros")).toBeInTheDocument();
+  });
+
+  it("puts pending sync status and action in the main shell", async () => {
+    const onSync = vi.fn(async () => undefined);
+    render(<Harness syncState={{ phase: "pending", message: "Meal saved. Sync needed." }} onSync={onSync} />);
+
+    expect(screen.getByRole("button", { name: "Sync needed" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Sync status")).toHaveTextContent("Meal saved. Sync needed.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync needed" }));
+
+    await waitFor(() => expect(onSync).toHaveBeenCalledTimes(1));
   });
 });

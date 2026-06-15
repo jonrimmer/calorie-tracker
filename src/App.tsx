@@ -53,6 +53,7 @@ export default function App() {
   });
   const [meta, setMeta] = useState<LocalMeta>({});
   const [accessToken, setAccessToken] = useState<string | undefined>();
+  const [silentAuthAttempted, setSilentAuthAttempted] = useState(false);
   const [selectedDate, setSelectedDate] = useState(toISODate());
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [syncState, setSyncState] = useState<SyncState>({ phase: "loading" });
@@ -69,12 +70,14 @@ export default function App() {
       setData(storedData);
       setMeta(storedMeta);
       setSyncState({
-        phase: storedMeta.spreadsheetId || storedMeta.localOnly ? "ready" : "needs-setup",
+        phase: storedMeta.pendingSync ? (navigator.onLine ? "pending" : "offline") : storedMeta.spreadsheetId || storedMeta.localOnly ? "ready" : "needs-setup",
         lastSyncAt: storedMeta.lastSyncAt,
         message: storedMeta.localOnly
           ? "Local test mode"
           : storedMeta.pendingSync
-            ? "Changes pending sync."
+            ? navigator.onLine
+              ? "Sync needed."
+              : "Offline changes saved locally."
             : storedMeta.lastSyncAt
               ? "Synced"
               : undefined
@@ -132,11 +135,11 @@ export default function App() {
 
       setSyncState((current) => ({
         ...current,
-        phase: navigator.onLine ? "ready" : "offline",
+        phase: navigator.onLine && meta.spreadsheetId && !meta.localOnly ? "pending" : navigator.onLine ? "ready" : "offline",
         message:
           meta.spreadsheetId && !meta.localOnly
             ? navigator.onLine
-              ? `${message} Pending sync.`
+              ? `${message} Sync needed.`
               : "Offline changes saved locally."
             : message
       }));
@@ -252,7 +255,7 @@ export default function App() {
   );
 
   const performGoogleSync = useCallback(
-    async (spreadsheetId?: string, prompt: "" | "consent" = "") => {
+    async (spreadsheetId?: string, prompt: "" | "consent" = "", tokenOverride?: string) => {
       if (!navigator.onLine) {
         setSyncState({ phase: "offline", message: "Offline changes saved locally.", lastSyncAt: meta.lastSyncAt });
         return;
@@ -263,7 +266,7 @@ export default function App() {
         spreadsheetId,
         prompt,
         meta,
-        getGoogleToken,
+        getGoogleToken: tokenOverride ? async () => tokenOverride : getGoogleToken,
         getLocalData: getTrackerData,
         ensureSpreadsheet: ensureTrackerSpreadsheet,
         readRemoteData: readSheetData,
@@ -292,11 +295,77 @@ export default function App() {
     }
 
     try {
-      await performGoogleSync(meta.spreadsheetId, meta.spreadsheetId ? "" : "consent");
+      await performGoogleSync(meta.spreadsheetId, accessToken ? "" : "consent");
     } catch (error) {
       setSyncState({ phase: "error", message: errorMessage(error), lastSyncAt: meta.lastSyncAt });
     }
-  }, [meta.lastSyncAt, meta.localOnly, meta.spreadsheetId, performGoogleSync]);
+  }, [accessToken, meta.lastSyncAt, meta.localOnly, meta.spreadsheetId, performGoogleSync]);
+
+  useEffect(() => {
+    if (!meta.spreadsheetId || meta.localOnly || syncState.phase === "syncing" || syncState.phase === "error") {
+      return;
+    }
+
+    if (!isOnline && meta.pendingSync) {
+      setSyncState((current) => ({ ...current, phase: "offline", message: "Offline changes saved locally." }));
+      return;
+    }
+
+    if (isOnline && meta.pendingSync && !accessToken) {
+      setSyncState((current) => ({ ...current, phase: "pending", message: "Sync needed. Tap Sync." }));
+    }
+  }, [accessToken, isOnline, meta.localOnly, meta.pendingSync, meta.spreadsheetId, syncState.phase]);
+
+  useEffect(() => {
+    if (
+      silentAuthAttempted ||
+      accessToken ||
+      !GOOGLE_CLIENT_ID ||
+      !isOnline ||
+      !meta.spreadsheetId ||
+      meta.localOnly ||
+      syncState.phase === "syncing"
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    setSilentAuthAttempted(true);
+
+    getGoogleToken("")
+      .then((token) => {
+        if (cancelled) {
+          return;
+        }
+
+        return performGoogleSync(meta.spreadsheetId, "", token);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setSyncState((current) => ({
+          ...current,
+          phase: meta.pendingSync ? "pending" : "ready",
+          message: meta.pendingSync ? "Sync needed. Tap Sync." : "Tap Sync to refresh."
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessToken,
+    getGoogleToken,
+    isOnline,
+    meta.localOnly,
+    meta.pendingSync,
+    meta.spreadsheetId,
+    performGoogleSync,
+    silentAuthAttempted,
+    syncState.phase
+  ]);
 
   useEffect(() => {
     if (!isOnline || !meta.spreadsheetId || meta.localOnly || !meta.pendingSync || !accessToken || syncState.phase === "syncing") {

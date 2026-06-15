@@ -1,7 +1,9 @@
 import {
+  AlertCircle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
   Cloud,
   Home,
   LogIn,
@@ -702,14 +704,130 @@ function SetupScreen({
   );
 }
 
-function SyncBadge({ syncState, isOnline }: { syncState: SyncState; isOnline: boolean }) {
-  const Icon = isOnline ? Cloud : WifiOff;
+function SyncBadge({
+  syncState,
+  isOnline,
+  onSync
+}: {
+  syncState: SyncState;
+  isOnline: boolean;
+  onSync: () => Promise<void>;
+}) {
+  const display = getSyncDisplay(syncState, isOnline, onSync);
+  const Icon = display.icon;
 
   return (
-    <div className={classNames("sync-badge", !isOnline && "sync-badge--offline")}>
+    <button
+      type="button"
+      className={classNames("sync-badge", `sync-badge--${display.tone}`)}
+      onClick={display.onSync}
+      disabled={display.disabled}
+      aria-label={display.label}
+      title={display.title}
+    >
       <Icon size={16} />
-      <span>{!isOnline ? "Offline" : syncState.phase === "syncing" ? "Syncing" : syncState.phase === "error" ? "Error" : "Ready"}</span>
-    </div>
+      <span>{display.label}</span>
+    </button>
+  );
+}
+
+function getSyncDisplay(syncState: SyncState, isOnline: boolean, onSync?: () => Promise<void>) {
+  if (!isOnline) {
+    return {
+      label: "Offline",
+      title: "Offline changes are saved locally",
+      tone: "offline",
+      icon: WifiOff,
+      disabled: true,
+      onSync
+    };
+  }
+
+  if (syncState.phase === "syncing") {
+    return {
+      label: "Syncing",
+      title: "Syncing with Google Sheets",
+      tone: "syncing",
+      icon: RefreshCw,
+      disabled: true,
+      onSync
+    };
+  }
+
+  if (syncState.phase === "pending") {
+    return {
+      label: "Sync needed",
+      title: syncState.message ?? "Local changes need to sync",
+      tone: "pending",
+      icon: AlertCircle,
+      disabled: false,
+      onSync
+    };
+  }
+
+  if (syncState.phase === "error") {
+    return {
+      label: "Sync error",
+      title: syncState.message ?? "Sync failed",
+      tone: "error",
+      icon: AlertCircle,
+      disabled: false,
+      onSync
+    };
+  }
+
+  if (syncState.phase === "synced") {
+    return {
+      label: "Synced",
+      title: syncState.message ?? "Synced",
+      tone: "synced",
+      icon: CheckCircle2,
+      disabled: false,
+      onSync
+    };
+  }
+
+  return {
+    label: "Sync",
+    title: syncState.message ?? "Sync with Google Sheets",
+    tone: "ready",
+    icon: Cloud,
+    disabled: false,
+    onSync
+  };
+}
+
+function SyncNotice({ syncState, isOnline, onSync }: { syncState: SyncState; isOnline: boolean; onSync: () => Promise<void> }) {
+  const display = getSyncDisplay(syncState, isOnline, onSync);
+  const showNotice =
+    !isOnline || syncState.phase === "pending" || syncState.phase === "error" || syncState.phase === "syncing";
+
+  if (!showNotice) {
+    return null;
+  }
+
+  const title =
+    syncState.phase === "pending"
+      ? "Sync needed"
+      : syncState.phase === "error"
+        ? "Sync error"
+        : syncState.phase === "syncing"
+          ? "Syncing"
+          : "Offline";
+
+  return (
+    <section className={classNames("sync-notice", `sync-notice--${display.tone}`)} aria-label="Sync status">
+      <div>
+        <strong>{title}</strong>
+        <p>{syncState.message ?? display.title}</p>
+      </div>
+      {(syncState.phase === "pending" || syncState.phase === "error") && (
+        <button type="button" className="ghost-button" onClick={onSync} disabled={!isOnline}>
+          <RefreshCw size={18} />
+          Sync
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -746,10 +864,13 @@ export function TrackerShell(props: TrackerShellProps) {
           <p className="eyebrow">Calorie Tracker</p>
           <strong>{formatShortDate(props.selectedDate)}</strong>
         </div>
-        <SyncBadge syncState={props.syncState} isOnline={props.isOnline} />
+        <SyncBadge syncState={props.syncState} isOnline={props.isOnline} onSync={props.onSync} />
       </header>
 
-      <main className="content">{currentView}</main>
+      <main className="content">
+        <SyncNotice syncState={props.syncState} isOnline={props.isOnline} onSync={props.onSync} />
+        {currentView}
+      </main>
 
       <nav className="tabbar" aria-label="Primary">
         {tabs.map((tab) => {

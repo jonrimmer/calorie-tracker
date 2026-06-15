@@ -58,6 +58,7 @@ export type SyncPhase =
   | "loading"
   | "needs-setup"
   | "offline"
+  | "pending"
   | "ready"
   | "syncing"
   | "synced"
