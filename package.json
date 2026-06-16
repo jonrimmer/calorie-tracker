@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@netlify/identity": "^1.2.0",
     "idb": "^8.0.3",
     "lucide-react": "^1.18.0",
     "react": "^19.2.7",

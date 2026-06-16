@@ -7,6 +7,7 @@ import {
   Cloud,
   Home,
   LogIn,
+  LogOut,
   Pencil,
   Plus,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
   SlidersHorizontal,
   Star,
   Trash2,
+  UserCircle,
   WifiOff
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
@@ -44,7 +46,17 @@ import { addDays, formatShortDate, formatWeekRange, getWeekDates } from "../lib/
 
 type TabId = "today" | "week" | "favourites" | "targets";
 
+export interface ShellUser {
+  name?: string;
+  email?: string;
+  pictureUrl?: string;
+}
+
 export interface TrackerShellProps {
+  authUser: ShellUser | null;
+  authLoading: boolean;
+  authMessage?: string;
+  localModeActive: boolean;
   data: TrackerData;
   selectedDate: string;
   syncState: SyncState;
@@ -52,6 +64,8 @@ export interface TrackerShellProps {
   isConfigured: boolean;
   isOnline: boolean;
   onSelectDate: (date: string) => void;
+  onSignIn: () => void;
+  onSignOut: () => Promise<void>;
   onSetupGoogle: () => Promise<void>;
   onSync: () => Promise<void>;
   onStartLocalMode?: () => Promise<void>;
@@ -684,8 +698,8 @@ function SetupScreen({
       <h1>Calorie Tracker</h1>
       <div className="setup-actions">
         <button className="primary-button primary-button--wide" type="button" onClick={onSetupGoogle} disabled={disabled}>
-          <LogIn size={18} />
-          Sign in with Google
+          <Cloud size={18} />
+          Connect Google Sheets
         </button>
         {onStartLocalMode && (
           <button className="ghost-button ghost-button--wide" type="button" onClick={onStartLocalMode}>
@@ -698,7 +712,40 @@ function SetupScreen({
           ? "Online setup required."
           : !googleClientConfigured
             ? "Set VITE_GOOGLE_CLIENT_ID."
-            : syncState.message ?? "Connect Google Drive."}
+            : syncState.message ?? "Connect Google Sheets."}
+      </p>
+    </main>
+  );
+}
+
+function AuthScreen({
+  authLoading,
+  authMessage,
+  isOnline,
+  onSignIn,
+  onStartLocalMode
+}: Pick<TrackerShellProps, "authLoading" | "authMessage" | "isOnline" | "onSignIn" | "onStartLocalMode">) {
+  const disabled = authLoading || !isOnline;
+
+  return (
+    <main className="setup-screen">
+      <div className="app-mark">
+        <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
+      </div>
+      <h1>Calorie Tracker</h1>
+      <div className="setup-actions">
+        <button className="primary-button primary-button--wide" type="button" onClick={onSignIn} disabled={disabled}>
+          <LogIn size={18} />
+          {authLoading ? "Checking sign-in" : "Sign in with Google"}
+        </button>
+        {onStartLocalMode && (
+          <button className="ghost-button ghost-button--wide" type="button" onClick={onStartLocalMode}>
+            Local test mode
+          </button>
+        )}
+      </div>
+      <p className="setup-status">
+        {authLoading ? "Checking sign-in." : !isOnline ? "Online sign-in required." : authMessage ?? "Sign in to continue."}
       </p>
     </main>
   );
@@ -838,6 +885,18 @@ const tabs: Array<{ id: TabId; label: string; icon: typeof Home }> = [
   { id: "targets", label: "Targets", icon: SlidersHorizontal }
 ];
 
+function AccountButton({ user, onSignOut }: { user: ShellUser; onSignOut: () => Promise<void> }) {
+  const label = user.name ?? user.email ?? "Account";
+
+  return (
+    <button type="button" className="account-button" onClick={onSignOut} aria-label={`Sign out ${label}`} title={`Sign out ${label}`}>
+      {user.pictureUrl ? <img src={user.pictureUrl} alt="" /> : <UserCircle size={17} />}
+      <span>{label}</span>
+      <LogOut size={15} />
+    </button>
+  );
+}
+
 export function TrackerShell(props: TrackerShellProps) {
   const [activeTab, setActiveTab] = useState<TabId>("today");
   const currentView = useMemo(() => {
@@ -853,6 +912,14 @@ export function TrackerShell(props: TrackerShellProps) {
     return <TargetsView {...props} />;
   }, [activeTab, props]);
 
+  if (props.authLoading && !props.localModeActive) {
+    return <AuthScreen {...props} />;
+  }
+
+  if (!props.authUser && !props.localModeActive) {
+    return <AuthScreen {...props} />;
+  }
+
   if (!props.isConfigured) {
     return <SetupScreen {...props} />;
   }
@@ -864,7 +931,10 @@ export function TrackerShell(props: TrackerShellProps) {
           <p className="eyebrow">Calorie Tracker</p>
           <strong>{formatShortDate(props.selectedDate)}</strong>
         </div>
-        <SyncBadge syncState={props.syncState} isOnline={props.isOnline} onSync={props.onSync} />
+        <div className="topbar__actions">
+          <SyncBadge syncState={props.syncState} isOnline={props.isOnline} onSync={props.onSync} />
+          {props.authUser && <AccountButton user={props.authUser} onSignOut={props.onSignOut} />}
+        </div>
       </header>
 
       <main className="content">

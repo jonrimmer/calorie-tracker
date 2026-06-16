@@ -122,6 +122,17 @@ button:disabled {
   font-size: 1.05rem;
 }
 
+.topbar > div:first-child {
+  min-width: 0;
+}
+
+.topbar__actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .eyebrow {
   margin: 0 0 2px;
   color: var(--muted);
@@ -184,6 +195,35 @@ button:disabled {
   border-color: var(--line);
   background: var(--surface);
   color: var(--ink);
+}
+
+.account-button {
+  display: inline-flex;
+  min-height: 34px;
+  max-width: 180px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.account-button img {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.account-button span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sync-notice {
@@ -576,6 +616,19 @@ button:disabled {
 
 .tabbar span {
   display: block;
+}
+
+@media (max-width: 520px) {
+  .account-button {
+    width: 36px;
+    justify-content: center;
+    padding: 6px;
+  }
+
+  .account-button span,
+  .account-button svg:last-child {
+    display: none;
+  }
 }
 
 @media (min-width: 720px) {

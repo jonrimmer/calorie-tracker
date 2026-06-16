@@ -23,23 +23,39 @@ function makeData(): TrackerData {
 }
 
 function Harness({
+  authUser = { email: "jon@example.com" },
+  authLoading = false,
+  isConfigured = true,
+  localModeActive = false,
   syncState = { phase: "ready", message: "Ready" },
+  onSignIn = () => undefined,
   onSync = async () => undefined
 }: {
+  authUser?: TrackerShellProps["authUser"];
+  authLoading?: boolean;
+  isConfigured?: boolean;
+  localModeActive?: boolean;
   syncState?: SyncState;
+  onSignIn?: () => void;
   onSync?: () => Promise<void>;
 } = {}) {
   const [data, setData] = useState<TrackerData>(makeData());
   const [date, setDate] = useState(selectedDate);
 
   const props: TrackerShellProps = {
+    authUser,
+    authLoading,
+    authMessage: undefined,
+    localModeActive,
     data,
     selectedDate: date,
     syncState,
     googleClientConfigured: true,
-    isConfigured: true,
+    isConfigured,
     isOnline: true,
     onSelectDate: setDate,
+    onSignIn,
+    onSignOut: async () => undefined,
     onSetupGoogle: async () => undefined,
     onSync,
     onSaveSettings: async (settings: SettingsDraft) => {
@@ -114,6 +130,23 @@ function fillMeal(name: string) {
 }
 
 describe("TrackerShell", () => {
+  it("shows Netlify Identity sign-in before tracker setup", () => {
+    const onSignIn = vi.fn();
+    render(<Harness authUser={null} onSignIn={onSignIn} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+
+    expect(onSignIn).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Log meal")).not.toBeInTheDocument();
+  });
+
+  it("shows Google Sheets setup after Identity sign-in", () => {
+    render(<Harness isConfigured={false} />);
+
+    expect(screen.getByRole("button", { name: "Connect Google Sheets" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in with Google" })).not.toBeInTheDocument();
+  });
+
   it("logs, edits, and deletes a meal", async () => {
     render(<Harness />);
 

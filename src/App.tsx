@@ -1,4 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AuthError,
+  MissingIdentityError,
+  getUser,
+  handleAuthCallback,
+  logout,
+  oauthLogin,
+  onAuthChange,
+  type CallbackResult,
+  type User as NetlifyUser
+} from "@netlify/identity";
 import { TrackerShell } from "./components/TrackerShell";
 import { createDemoData } from "./lib/demoData";
 import { DEFAULT_SETTINGS } from "./lib/nutrition";
@@ -45,6 +56,38 @@ function errorMessage(error: unknown): string {
   return "Something went wrong.";
 }
 
+function authErrorMessage(error: unknown): string {
+  if (error instanceof MissingIdentityError) {
+    return "Netlify Identity is available after deployment.";
+  }
+
+  if (error instanceof AuthError || error instanceof Error) {
+    return error.message;
+  }
+
+  return "Sign-in failed.";
+}
+
+function authCallbackMessage(result: CallbackResult | null): string | undefined {
+  if (!result) {
+    return undefined;
+  }
+
+  if (result.type === "oauth") {
+    return "Signed in.";
+  }
+
+  if (result.type === "confirmation") {
+    return "Email confirmed.";
+  }
+
+  if (result.type === "email_change") {
+    return "Email updated.";
+  }
+
+  return undefined;
+}
+
 export default function App() {
   const [data, setData] = useState<TrackerData>({
     settings: DEFAULT_SETTINGS,
@@ -52,11 +95,59 @@ export default function App() {
     favourites: []
   });
   const [meta, setMeta] = useState<LocalMeta>({});
+  const [authUser, setAuthUser] = useState<NetlifyUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMessage, setAuthMessage] = useState<string | undefined>();
   const [accessToken, setAccessToken] = useState<string | undefined>();
   const [silentAuthAttempted, setSilentAuthAttempted] = useState(false);
   const [selectedDate, setSelectedDate] = useState(toISODate());
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [syncState, setSyncState] = useState<SyncState>({ phase: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAuth() {
+      try {
+        const result = await handleAuthCallback();
+        const currentUser = result?.user ?? (await getUser());
+
+        if (cancelled) {
+          return;
+        }
+
+        setAuthUser(currentUser);
+        setAuthMessage(authCallbackMessage(result));
+      } catch (error) {
+        const currentUser = await getUser();
+
+        if (cancelled) {
+          return;
+        }
+
+        setAuthUser(currentUser);
+        setAuthMessage(authErrorMessage(error));
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    const unsubscribe = onAuthChange((_event, currentUser) => {
+      setAuthUser(currentUser);
+      if (!currentUser) {
+        setAccessToken(undefined);
+      }
+    });
+
+    loadAuth();
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +250,29 @@ export default function App() {
     },
     [accessToken]
   );
+
+  const signIn = useCallback(() => {
+    try {
+      setAuthMessage("Redirecting...");
+      oauthLogin("google");
+    } catch (error) {
+      setAuthMessage(authErrorMessage(error));
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    let message: string | undefined;
+
+    try {
+      await logout();
+    } catch (error) {
+      message = authErrorMessage(error);
+    }
+
+    setAuthUser(null);
+    setAccessToken(undefined);
+    setAuthMessage(message);
+  }, []);
 
   const saveSettings = useCallback(
     async (draft: SettingsDraft) => {
@@ -409,6 +523,10 @@ export default function App() {
 
   return (
     <TrackerShell
+      authUser={authUser ? { name: authUser.name, email: authUser.email, pictureUrl: authUser.pictureUrl } : null}
+      authLoading={authLoading}
+      authMessage={authMessage}
+      localModeActive={Boolean(meta.localOnly && startLocalMode)}
       data={data}
       selectedDate={selectedDate}
       syncState={syncState}
@@ -416,6 +534,8 @@ export default function App() {
       isConfigured={Boolean(meta.spreadsheetId || meta.localOnly)}
       isOnline={isOnline}
       onSelectDate={setSelectedDate}
+      onSignIn={signIn}
+      onSignOut={signOut}
       onSetupGoogle={setupGoogle}
       onSync={syncNow}
       onStartLocalMode={startLocalMode}
