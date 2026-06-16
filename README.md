@@ -66,13 +66,13 @@ In Netlify, create a site from this repo and add this environment variable:
 VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 ```
 
-Enable Identity in **Project configuration > Identity**, then enable Google under **External providers**. If Netlify asks for Google OAuth credentials, add the Netlify Identity callback URL to the Google OAuth client's authorized redirect URIs:
+Enable Identity in **Project configuration > Identity**, then enable Google under **External providers**. If Netlify asks for Google OAuth credentials, add Netlify Identity's OAuth callback URL to the Google OAuth client's authorized redirect URIs:
 
 ```text
-https://YOUR-SITE.netlify.app/.netlify/identity/callback
+https://identity.services.netlify.com/callback
 ```
 
-Add the same callback for any custom production domain you use.
+The same Google OAuth client is also used by the app for Sheets sync, so keep your Netlify site origin in the authorized JavaScript origins list.
 
 ## Commands
 

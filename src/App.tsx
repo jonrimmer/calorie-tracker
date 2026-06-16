@@ -409,11 +409,11 @@ export default function App() {
     }
 
     try {
-      await performGoogleSync(meta.spreadsheetId, accessToken ? "" : "consent");
+      await performGoogleSync(meta.spreadsheetId);
     } catch (error) {
       setSyncState({ phase: "error", message: errorMessage(error), lastSyncAt: meta.lastSyncAt });
     }
-  }, [accessToken, meta.lastSyncAt, meta.localOnly, meta.spreadsheetId, performGoogleSync]);
+  }, [meta.lastSyncAt, meta.localOnly, meta.spreadsheetId, performGoogleSync]);
 
   useEffect(() => {
     if (!meta.spreadsheetId || meta.localOnly || syncState.phase === "syncing" || syncState.phase === "error") {

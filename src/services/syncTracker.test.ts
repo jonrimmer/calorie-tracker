@@ -42,11 +42,15 @@ const remoteData: TrackerData = {
 
 describe("syncTrackerData", () => {
   it("writes the latest local IndexedDB snapshot, including meals", async () => {
+    let requestedPrompt: "" | "consent" | undefined;
     let writtenData: TrackerData | undefined;
 
     const result = await syncTrackerData({
       meta: { spreadsheetId: "sheet-1", pendingSync: true },
-      getGoogleToken: async () => "token",
+      getGoogleToken: async (prompt) => {
+        requestedPrompt = prompt;
+        return "token";
+      },
       getLocalData: async () => localData,
       ensureSpreadsheet: async () => "unused",
       readRemoteData: async () => remoteData,
@@ -57,6 +61,7 @@ describe("syncTrackerData", () => {
       now: () => "2026-06-15T12:01:00.000Z"
     });
 
+    expect(requestedPrompt).toBe("");
     expect(writtenData?.settings.calorieTarget).toBe(3200);
     expect(writtenData?.meals).toHaveLength(1);
     expect(writtenData?.meals[0].name).toBe("Post-workout pasta");
