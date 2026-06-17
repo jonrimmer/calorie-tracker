@@ -41,6 +41,7 @@ import type {
   TrackerData
 } from "./types";
 import { toISODate } from "./lib/date";
+import { estimateMealFromDescription } from "./services/mealEstimator";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
@@ -311,6 +312,8 @@ export default function App() {
     [data, noteLocalChange]
   );
 
+  const estimateMeal = useCallback(async (description: string) => estimateMealFromDescription(description), []);
+
   const deleteMeal = useCallback(
     async (meal: Meal) => {
       const now = new Date().toISOString();
@@ -541,6 +544,7 @@ export default function App() {
       onStartLocalMode={startLocalMode}
       onSaveSettings={saveSettings}
       onSaveMeal={saveMeal}
+      onEstimateMeal={estimateMeal}
       onDeleteMeal={deleteMeal}
       onSaveFavourite={saveFavourite}
       onDeleteFavourite={deleteFavourite}

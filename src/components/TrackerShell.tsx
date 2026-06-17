@@ -16,6 +16,7 @@ import {
   Star,
   Trash2,
   UserCircle,
+  WandSparkles,
   WifiOff
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
@@ -24,6 +25,7 @@ import type {
   FavouriteMeal,
   Meal,
   MealDraft,
+  MealEstimate,
   Nutrition,
   Settings,
   SettingsDraft,
@@ -71,6 +73,7 @@ export interface TrackerShellProps {
   onStartLocalMode?: () => Promise<void>;
   onSaveSettings: (settings: SettingsDraft) => Promise<void>;
   onSaveMeal: (meal: MealDraft) => Promise<void>;
+  onEstimateMeal: (description: string) => Promise<MealEstimate>;
   onDeleteMeal: (meal: Meal) => Promise<void>;
   onSaveFavourite: (favourite: FavouriteDraft) => Promise<FavouriteMeal>;
   onDeleteFavourite: (favourite: FavouriteMeal) => Promise<void>;
@@ -194,7 +197,9 @@ interface MealFormProps {
   editingMeal?: Meal;
   onCancelEdit: () => void;
   onSaveMeal: (meal: MealDraft) => Promise<void>;
+  onEstimateMeal: (description: string) => Promise<MealEstimate>;
   onSaveFavourite: (favourite: FavouriteDraft) => Promise<FavouriteMeal>;
+  isOnline: boolean;
 }
 
 function MealForm({
@@ -203,9 +208,14 @@ function MealForm({
   editingMeal,
   onCancelEdit,
   onSaveMeal,
-  onSaveFavourite
+  onEstimateMeal,
+  onSaveFavourite,
+  isOnline
 }: MealFormProps) {
   const [selectedFavouriteId, setSelectedFavouriteId] = useState("");
+  const [mealDescription, setMealDescription] = useState("");
+  const [estimateState, setEstimateState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [estimateMessage, setEstimateMessage] = useState("");
   const [form, setForm] = useState({
     name: editingMeal?.name ?? "",
     date: editingMeal?.date ?? selectedDate,
@@ -232,6 +242,40 @@ function MealForm({
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleEstimate() {
+    const description = mealDescription.trim();
+
+    if (!description) {
+      return;
+    }
+
+    if (!isOnline) {
+      setEstimateState("error");
+      setEstimateMessage("Online estimate needed.");
+      return;
+    }
+
+    setEstimateState("loading");
+    setEstimateMessage("");
+
+    try {
+      const estimate = await onEstimateMeal(description);
+      setForm((current) => ({
+        ...current,
+        name: current.name.trim() ? current.name : estimate.name,
+        calories: String(estimate.calories),
+        proteinG: String(estimate.proteinG),
+        carbsG: String(estimate.carbsG),
+        fatG: String(estimate.fatG)
+      }));
+      setEstimateState("success");
+      setEstimateMessage("Estimated macros added.");
+    } catch (error) {
+      setEstimateState("error");
+      setEstimateMessage(error instanceof Error && error.message ? error.message : "Estimate failed.");
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -270,6 +314,9 @@ function MealForm({
     await onSaveMeal({ ...draft, favouriteId: favouriteId || undefined });
     form.reset();
     setSelectedFavouriteId("");
+    setMealDescription("");
+    setEstimateState("idle");
+    setEstimateMessage("");
     setForm({ name: "", date: selectedDate, calories: "", proteinG: "", carbsG: "", fatG: "" });
     onCancelEdit();
   }
@@ -291,6 +338,39 @@ function MealForm({
             Cancel
           </button>
         )}
+      </div>
+
+      <div className="estimate-box">
+        <label className="field field--wide">
+          <span>Description</span>
+          <textarea
+            value={mealDescription}
+            onChange={(event) => {
+              setMealDescription(event.currentTarget.value);
+              setEstimateState("idle");
+              setEstimateMessage("");
+            }}
+            placeholder="Chicken burrito bowl with rice and guac"
+            rows={3}
+          />
+        </label>
+        <div className="estimate-box__actions">
+          {estimateMessage && (
+            <p className={classNames("estimate-message", estimateState === "error" && "estimate-message--error")}>
+              {estimateMessage}
+            </p>
+          )}
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={handleEstimate}
+            disabled={estimateState === "loading" || !mealDescription.trim()}
+            aria-label="Estimate macros"
+          >
+            {estimateState === "loading" ? <RefreshCw size={18} /> : <WandSparkles size={18} />}
+            {estimateState === "loading" ? "Estimating" : "Estimate"}
+          </button>
+        </div>
       </div>
 
       <div className="field-grid">
@@ -436,7 +516,9 @@ function TodayView(props: TrackerShellProps) {
         editingMeal={editingMeal}
         onCancelEdit={() => setEditingMeal(undefined)}
         onSaveMeal={props.onSaveMeal}
+        onEstimateMeal={props.onEstimateMeal}
         onSaveFavourite={props.onSaveFavourite}
+        isOnline={props.isOnline}
       />
       <MealList meals={dayMeals} onEditMeal={setEditingMeal} onDeleteMeal={props.onDeleteMeal} />
     </>

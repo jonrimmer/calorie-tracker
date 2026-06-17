@@ -8,6 +8,10 @@ export interface Nutrition {
   fatG: number;
 }
 
+export interface MealEstimate extends Nutrition {
+  name: string;
+}
+
 export interface Settings {
   schemaVersion: number;
   calorieTarget: number;

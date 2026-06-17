@@ -2,7 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TrackerShell, type TrackerShellProps } from "./TrackerShell";
-import type { FavouriteDraft, FavouriteMeal, Meal, MealDraft, SettingsDraft, SyncState, TrackerData } from "../types";
+import type {
+  FavouriteDraft,
+  FavouriteMeal,
+  Meal,
+  MealDraft,
+  MealEstimate,
+  SettingsDraft,
+  SyncState,
+  TrackerData
+} from "../types";
 
 const selectedDate = "2026-06-15";
 const now = "2026-06-15T10:00:00.000Z";
@@ -29,7 +38,14 @@ function Harness({
   localModeActive = false,
   syncState = { phase: "ready", message: "Ready" },
   onSignIn = () => undefined,
-  onSync = async () => undefined
+  onSync = async () => undefined,
+  onEstimateMeal = async () => ({
+    name: "Estimated meal",
+    calories: 650,
+    proteinG: 52,
+    carbsG: 72,
+    fatG: 18
+  })
 }: {
   authUser?: TrackerShellProps["authUser"];
   authLoading?: boolean;
@@ -38,6 +54,7 @@ function Harness({
   syncState?: SyncState;
   onSignIn?: () => void;
   onSync?: () => Promise<void>;
+  onEstimateMeal?: (description: string) => Promise<MealEstimate>;
 } = {}) {
   const [data, setData] = useState<TrackerData>(makeData());
   const [date, setDate] = useState(selectedDate);
@@ -81,6 +98,7 @@ function Harness({
         };
       });
     },
+    onEstimateMeal,
     onDeleteMeal: async (meal: Meal) => {
       setData((current) => ({
         ...current,
@@ -164,6 +182,31 @@ describe("TrackerShell", () => {
 
     await waitFor(() => expect(screen.queryByText("Chicken wrap")).not.toBeInTheDocument());
     expect(screen.getByText("No meals logged.")).toBeInTheDocument();
+  });
+
+  it("estimates meal macros from a description", async () => {
+    const onEstimateMeal = vi.fn(async () => ({
+      name: "Chicken Rice Bowl",
+      calories: 720,
+      proteinG: 45,
+      carbsG: 82,
+      fatG: 20
+    }));
+    render(<Harness onEstimateMeal={onEstimateMeal} />);
+
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "large chicken rice bowl with guacamole" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Estimate macros" }));
+
+    await screen.findByText("Estimated macros added.");
+
+    expect(onEstimateMeal).toHaveBeenCalledWith("large chicken rice bowl with guacamole");
+    expect(screen.getByLabelText("Name")).toHaveDisplayValue("Chicken Rice Bowl");
+    expect(screen.getByLabelText("Calories")).toHaveDisplayValue("720");
+    expect(screen.getByLabelText("Protein")).toHaveDisplayValue("45");
+    expect(screen.getByLabelText("Carbs")).toHaveDisplayValue("82");
+    expect(screen.getByLabelText("Fat")).toHaveDisplayValue("20");
   });
 
   it("saves and logs a favourite meal", async () => {

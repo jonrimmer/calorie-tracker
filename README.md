@@ -10,6 +10,7 @@ A mobile-first React SPA for tracking daily calories, protein, carbs, and fat wh
 - Last-edit-wins sync when the network returns
 - Daily and weekly calorie/macro dashboards
 - Favourite meals for quick logging
+- LLM-assisted macro estimates from short meal descriptions
 - Netlify deployment configuration
 
 ## Local Setup
@@ -24,12 +25,21 @@ Create `.env.local`:
 
 ```bash
 VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+# Optional for local macro estimates when not using Netlify AI Gateway:
+OPENAI_API_KEY=your-openai-api-key
+MEAL_ESTIMATOR_MODEL=gpt-5-mini
 ```
 
 Run the app:
 
 ```bash
 npm run dev
+```
+
+Run through Netlify Dev when testing meal macro estimates locally so the `/api/estimate-meal` function is available:
+
+```bash
+netlify dev
 ```
 
 Without a Google client ID, the development build shows a local test mode button so the UI can be checked without Google Sheets setup. Netlify Identity sign-in is intended to be tested on a Netlify deploy preview or production deploy.
@@ -65,6 +75,8 @@ In Netlify, create a site from this repo and add this environment variable:
 ```bash
 VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 ```
+
+Meal macro estimates use a Netlify Function and the OpenAI SDK. On Netlify, enable AI Gateway for the site or set `OPENAI_API_KEY`; `MEAL_ESTIMATOR_MODEL` is optional and defaults to `gpt-5-mini`.
 
 Enable Identity in **Project configuration > Identity**, then enable Google under **External providers**. If Netlify asks for Google OAuth credentials, add Netlify Identity's OAuth callback URL to the Google OAuth client's authorized redirect URIs:
 
