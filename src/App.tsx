@@ -1,15 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  AuthError,
-  MissingIdentityError,
-  getUser,
-  handleAuthCallback,
-  logout,
-  oauthLogin,
-  onAuthChange,
-  type CallbackResult,
-  type User as NetlifyUser
-} from "@netlify/identity";
 import { TrackerShell } from "./components/TrackerShell";
 import { createDemoData } from "./lib/demoData";
 import { DEFAULT_SETTINGS } from "./lib/nutrition";
@@ -24,12 +13,17 @@ import {
 } from "./storage/db";
 import {
   authorizeGoogle,
+  clearStoredGoogleUser,
   ensureTrackerSpreadsheet,
+  getStoredGoogleUser,
   readSheetData,
+  signInWithGoogle,
   writeSheetData,
-  GoogleApiError
+  GoogleApiError,
+  type GoogleUser
 } from "./services/google";
 import { syncTrackerData } from "./services/syncTracker";
+import { syncRequestForMeta } from "./lib/syncMode";
 import type {
   FavouriteDraft,
   FavouriteMeal,
@@ -44,6 +38,7 @@ import { toISODate } from "./lib/date";
 import { estimateMealFromDescription } from "./services/mealEstimator";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_SYNC_PROFILE = import.meta.env.VITE_GOOGLE_SYNC_PROFILE ?? (import.meta.env.DEV ? "dev" : "prod");
 
 function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
@@ -58,35 +53,11 @@ function errorMessage(error: unknown): string {
 }
 
 function authErrorMessage(error: unknown): string {
-  if (error instanceof MissingIdentityError) {
-    return "Netlify Identity is available after deployment.";
-  }
-
-  if (error instanceof AuthError || error instanceof Error) {
+  if (error instanceof GoogleApiError || error instanceof Error) {
     return error.message;
   }
 
   return "Sign-in failed.";
-}
-
-function authCallbackMessage(result: CallbackResult | null): string | undefined {
-  if (!result) {
-    return undefined;
-  }
-
-  if (result.type === "oauth") {
-    return "Signed in.";
-  }
-
-  if (result.type === "confirmation") {
-    return "Email confirmed.";
-  }
-
-  if (result.type === "email_change") {
-    return "Email updated.";
-  }
-
-  return undefined;
 }
 
 export default function App() {
@@ -96,59 +67,14 @@ export default function App() {
     favourites: []
   });
   const [meta, setMeta] = useState<LocalMeta>({});
-  const [authUser, setAuthUser] = useState<NetlifyUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<GoogleUser | null>(() => getStoredGoogleUser());
+  const [authLoading, setAuthLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | undefined>();
   const [accessToken, setAccessToken] = useState<string | undefined>();
   const [silentAuthAttempted, setSilentAuthAttempted] = useState(false);
   const [selectedDate, setSelectedDate] = useState(toISODate());
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [syncState, setSyncState] = useState<SyncState>({ phase: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadAuth() {
-      try {
-        const result = await handleAuthCallback();
-        const currentUser = result?.user ?? (await getUser());
-
-        if (cancelled) {
-          return;
-        }
-
-        setAuthUser(currentUser);
-        setAuthMessage(authCallbackMessage(result));
-      } catch (error) {
-        const currentUser = await getUser();
-
-        if (cancelled) {
-          return;
-        }
-
-        setAuthUser(currentUser);
-        setAuthMessage(authErrorMessage(error));
-      } finally {
-        if (!cancelled) {
-          setAuthLoading(false);
-        }
-      }
-    }
-
-    const unsubscribe = onAuthChange((_event, currentUser) => {
-      setAuthUser(currentUser);
-      if (!currentUser) {
-        setAccessToken(undefined);
-      }
-    });
-
-    loadAuth();
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -252,27 +178,26 @@ export default function App() {
     [accessToken]
   );
 
-  const signIn = useCallback(() => {
+  const signIn = useCallback(async () => {
     try {
-      setAuthMessage("Redirecting...");
-      oauthLogin("google");
+      setAuthLoading(true);
+      setAuthMessage("Opening Google sign-in...");
+      const user = await signInWithGoogle(GOOGLE_CLIENT_ID);
+      setAuthUser(user);
+      setAuthMessage("Signed in.");
     } catch (error) {
       setAuthMessage(authErrorMessage(error));
+    } finally {
+      setAuthLoading(false);
     }
   }, []);
 
   const signOut = useCallback(async () => {
-    let message: string | undefined;
-
-    try {
-      await logout();
-    } catch (error) {
-      message = authErrorMessage(error);
-    }
-
+    clearStoredGoogleUser();
     setAuthUser(null);
     setAccessToken(undefined);
-    setAuthMessage(message);
+    setSilentAuthAttempted(false);
+    setAuthMessage(undefined);
   }, []);
 
   const saveSettings = useCallback(
@@ -385,7 +310,7 @@ export default function App() {
         meta,
         getGoogleToken: tokenOverride ? async () => tokenOverride : getGoogleToken,
         getLocalData: getTrackerData,
-        ensureSpreadsheet: ensureTrackerSpreadsheet,
+        ensureSpreadsheet: (accessToken) => ensureTrackerSpreadsheet(accessToken, GOOGLE_SYNC_PROFILE),
         readRemoteData: readSheetData,
         writeRemoteData: writeSheetData
       });
@@ -406,13 +331,9 @@ export default function App() {
   }, [meta.lastSyncAt, performGoogleSync]);
 
   const syncNow = useCallback(async () => {
-    if (meta.localOnly && !meta.spreadsheetId) {
-      setSyncState({ phase: "ready", message: "Local test mode" });
-      return;
-    }
-
     try {
-      await performGoogleSync(meta.spreadsheetId);
+      const request = syncRequestForMeta(meta);
+      await performGoogleSync(request.spreadsheetId, request.prompt);
     } catch (error) {
       setSyncState({ phase: "error", message: errorMessage(error), lastSyncAt: meta.lastSyncAt });
     }

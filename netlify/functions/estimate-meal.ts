@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIError } from "openai";
 
 interface MealEstimate {
   name: string;
@@ -53,6 +53,12 @@ function getEnv(name: string): string | undefined {
   return netlifyEnv?.get(name) ?? process.env[name];
 }
 
+function isLocalDevelopment(): boolean {
+  const context = getEnv("CONTEXT");
+  const nodeEnv = getEnv("NODE_ENV");
+  return context === "dev" || nodeEnv === "development" || getEnv("NETLIFY_DEV") === "true";
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return Response.json(data, init);
 }
@@ -83,7 +89,12 @@ function parseEstimate(content: string | null | undefined): MealEstimate | undef
     return undefined;
   }
 
-  const parsed = JSON.parse(content) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
 
   if (!isRecord(parsed)) {
     return undefined;
@@ -100,6 +111,86 @@ function parseEstimate(content: string | null | undefined): MealEstimate | undef
   }
 
   return { name, calories, proteinG, carbsG, fatG };
+}
+
+function extractOutputText(response: unknown): string | undefined {
+  if (!isRecord(response)) {
+    return undefined;
+  }
+
+  if (typeof response.output_text === "string" && response.output_text.trim()) {
+    return response.output_text;
+  }
+
+  if (!Array.isArray(response.output)) {
+    return undefined;
+  }
+
+  const textParts: string[] = [];
+  for (const item of response.output) {
+    if (!isRecord(item) || !Array.isArray(item.content)) {
+      continue;
+    }
+
+    for (const contentPart of item.content) {
+      if (!isRecord(contentPart)) {
+        continue;
+      }
+
+      if (contentPart.type === "output_text" && typeof contentPart.text === "string") {
+        textParts.push(contentPart.text);
+      }
+    }
+  }
+
+  const text = textParts.join("").trim();
+  return text || undefined;
+}
+
+function usesReasoningControls(model: string): boolean {
+  const normalizedModel = model.toLowerCase();
+  return normalizedModel.startsWith("gpt-5") || /^o\d/.test(normalizedModel);
+}
+
+function sanitizeErrorMessage(message: string): string {
+  return message.replace(/sk-[A-Za-z0-9_-]+/g, "sk-...");
+}
+
+function describeEstimateFailure(error: unknown): string {
+  if (error instanceof APIError) {
+    const status = error.status ? ` (${error.status})` : "";
+    const detail = isLocalDevelopment() ? ` ${sanitizeErrorMessage(error.message)}` : "";
+
+    if (error.status === 401 || error.status === 403) {
+      return `Meal estimate failed${status}. Check OPENAI_API_KEY or Netlify AI Gateway access.${detail}`;
+    }
+
+    if (error.status === 404) {
+      return `Meal estimate failed${status}. Check MEAL_ESTIMATOR_MODEL is available for your OpenAI account or Netlify AI Gateway.${detail}`;
+    }
+
+    if (error.status === 429) {
+      return `Meal estimate failed${status}. The OpenAI request was rate limited or out of quota.${detail}`;
+    }
+
+    return `Meal estimate failed${status}.${detail}`;
+  }
+
+  if (error instanceof Error && isLocalDevelopment()) {
+    return `Meal estimate failed. ${sanitizeErrorMessage(error.message)}`;
+  }
+
+  return "Meal estimate failed.";
+}
+
+function describeResponseFailure(error: unknown): string {
+  if (!isLocalDevelopment() || !isRecord(error)) {
+    return "Meal estimate failed.";
+  }
+
+  const code = typeof error.code === "string" ? ` ${error.code}:` : "";
+  const message = typeof error.message === "string" ? ` ${sanitizeErrorMessage(error.message)}` : "";
+  return `Meal estimate failed.${code}${message}`.trim();
 }
 
 export default async (req: Request) => {
@@ -119,34 +210,30 @@ export default async (req: Request) => {
     return json({ error: "Describe the meal first." }, { status: 400 });
   }
 
-  const apiKey = getEnv("OPENAI_API_KEY");
   const baseURL = getEnv("OPENAI_BASE_URL");
+  const apiKey = getEnv("OPENAI_API_KEY") ?? (baseURL ? "netlify-ai-gateway" : undefined);
 
   if (!apiKey) {
-    return json({ error: "Meal estimator is not configured." }, { status: 500 });
+    return json({ error: "Meal estimator is not configured. Set OPENAI_API_KEY or enable Netlify AI Gateway." }, { status: 500 });
   }
 
   const client = new OpenAI({ apiKey, baseURL });
   const model = getEnv("MEAL_ESTIMATOR_MODEL") ?? "gpt-5-mini";
+  const reasoning = usesReasoningControls(model) && !model.toLowerCase().includes("pro") ? { effort: "low" as const } : undefined;
 
   try {
-    const completion = await client.chat.completions.create({
+    const response = await client.responses.create({
       model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You estimate nutrition for meal logging. Use the user's quantities when present, infer common serving sizes when absent, and return one plausible estimate. Calories are kcal; proteinG, carbsG, and fatG are grams."
-        },
-        {
-          role: "user",
-          content: `Meal description: ${description}`
-        }
-      ],
-      max_completion_tokens: 220,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
+      instructions:
+        "You estimate nutrition for meal logging. Use the user's quantities when present, infer common serving sizes when absent, and return one plausible estimate. Calories are kcal; proteinG, carbsG, and fatG are grams.",
+      input: `Meal description: ${description}`,
+      max_output_tokens: 800,
+      reasoning,
+      store: false,
+      text: {
+        verbosity: "low",
+        format: {
+          type: "json_schema",
           name: "meal_macro_estimate",
           strict: true,
           schema: estimateSchema
@@ -154,7 +241,17 @@ export default async (req: Request) => {
       }
     });
 
-    const estimate = parseEstimate(completion.choices[0]?.message.content);
+    if (response.status === "failed") {
+      console.error("Meal estimate response failed", response.error);
+      return json({ error: describeResponseFailure(response.error) }, { status: 502 });
+    }
+
+    if (response.status === "incomplete") {
+      console.error("Meal estimate response incomplete", response.incomplete_details);
+      return json({ error: "Meal estimate was incomplete. Try a shorter meal description." }, { status: 502 });
+    }
+
+    const estimate = parseEstimate(extractOutputText(response));
 
     if (!estimate) {
       return json({ error: "Meal estimate was incomplete." }, { status: 502 });
@@ -163,7 +260,7 @@ export default async (req: Request) => {
     return json({ estimate });
   } catch (error) {
     console.error("Meal estimate failed", error);
-    return json({ error: "Meal estimate failed." }, { status: 502 });
+    return json({ error: describeEstimateFailure(error) }, { status: 502 });
   }
 };
 

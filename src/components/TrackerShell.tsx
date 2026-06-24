@@ -66,7 +66,7 @@ export interface TrackerShellProps {
   isConfigured: boolean;
   isOnline: boolean;
   onSelectDate: (date: string) => void;
-  onSignIn: () => void;
+  onSignIn: () => void | Promise<void>;
   onSignOut: () => Promise<void>;
   onSetupGoogle: () => Promise<void>;
   onSync: () => Promise<void>;

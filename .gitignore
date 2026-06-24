@@ -6,3 +6,6 @@ dist
 .env.*.local
 coverage
 *.tsbuildinfo
+
+# Local Netlify folder
+.netlify

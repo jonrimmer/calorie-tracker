@@ -148,7 +148,7 @@ function fillMeal(name: string) {
 }
 
 describe("TrackerShell", () => {
-  it("shows Netlify Identity sign-in before tracker setup", () => {
+  it("shows Google sign-in before tracker setup", () => {
     const onSignIn = vi.fn();
     render(<Harness authUser={null} onSignIn={onSignIn} />);
 
@@ -158,7 +158,7 @@ describe("TrackerShell", () => {
     expect(screen.queryByText("Log meal")).not.toBeInTheDocument();
   });
 
-  it("shows Google Sheets setup after Identity sign-in", () => {
+  it("shows Google Sheets setup after sign-in", () => {
     render(<Harness isConfigured={false} />);
 
     expect(screen.getByRole("button", { name: "Connect Google Sheets" })).toBeInTheDocument();

@@ -3,6 +3,9 @@ import { DEFAULT_SETTINGS } from "../lib/nutrition";
 
 const SHEET_TITLE = "Calorie Tracker";
 const APP_DATA_FILE = "calorie-tracker-spreadsheet.json";
+const PRODUCTION_SYNC_PROFILE = "prod";
+const GOOGLE_USER_STORAGE_KEY = "calorie-tracker-google-user";
+const PROFILE_SCOPES = ["openid", "email", "profile"].join(" ");
 const SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.appdata",
@@ -51,9 +54,23 @@ interface TokenResponse {
 }
 
 interface TokenClient {
-  requestAccessToken: (options?: { prompt?: string }) => void;
+  requestAccessToken: (options?: { prompt?: GooglePrompt }) => void;
   callback?: (response: TokenResponse) => void;
 }
+
+interface SpreadsheetConfig {
+  appDataFile: string;
+  sheetTitle: string;
+}
+
+export interface GoogleUser {
+  id: string;
+  email: string;
+  name?: string;
+  pictureUrl?: string;
+}
+
+type GooglePrompt = "" | "consent" | "none" | "select_account";
 
 interface GoogleIdentity {
   accounts: {
@@ -80,15 +97,103 @@ export class GoogleApiError extends Error {
   }
 }
 
-let identityScriptPromise: Promise<void> | undefined;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-function loadIdentityScript(): Promise<void> {
+function normaliseSyncProfile(profile: string | undefined): string {
+  const normalised = (profile ?? PRODUCTION_SYNC_PROFILE)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalised || PRODUCTION_SYNC_PROFILE;
+}
+
+export function spreadsheetConfigForProfile(profile?: string): SpreadsheetConfig {
+  const syncProfile = normaliseSyncProfile(profile);
+
+  if (syncProfile === PRODUCTION_SYNC_PROFILE) {
+    return {
+      appDataFile: APP_DATA_FILE,
+      sheetTitle: SHEET_TITLE
+    };
+  }
+
+  return {
+    appDataFile: `calorie-tracker-spreadsheet.${syncProfile}.json`,
+    sheetTitle: `${SHEET_TITLE} (${syncProfile})`
+  };
+}
+
+function parseGoogleUser(value: unknown): GoogleUser {
+  if (!isRecord(value)) {
+    throw new GoogleApiError("Google profile was not returned.");
+  }
+
+  const id =
+    typeof value.id === "string"
+      ? value.id.trim()
+      : typeof value.sub === "string"
+        ? value.sub.trim()
+        : "";
+  const email = typeof value.email === "string" ? value.email.trim() : "";
+  const name = typeof value.name === "string" ? value.name.trim() : "";
+  const pictureUrl =
+    typeof value.pictureUrl === "string" ? value.pictureUrl : typeof value.picture === "string" ? value.picture : "";
+
+  if (!id || !email) {
+    throw new GoogleApiError("Google profile was incomplete.");
+  }
+
+  return {
+    id,
+    email,
+    name: name || undefined,
+    pictureUrl: pictureUrl || undefined
+  };
+}
+
+function getLocalStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined {
+  if (
+    typeof localStorage === "undefined" ||
+    typeof localStorage.getItem !== "function" ||
+    typeof localStorage.setItem !== "function" ||
+    typeof localStorage.removeItem !== "function"
+  ) {
+    return undefined;
+  }
+
+  return localStorage;
+}
+
+function saveStoredGoogleUser(user: GoogleUser): void {
+  getLocalStorage()?.setItem(GOOGLE_USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+export function getStoredGoogleUser(): GoogleUser | null {
+  try {
+    const value = getLocalStorage()?.getItem(GOOGLE_USER_STORAGE_KEY);
+    return value ? parseGoogleUser(JSON.parse(value)) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearStoredGoogleUser(): void {
+  getLocalStorage()?.removeItem(GOOGLE_USER_STORAGE_KEY);
+}
+
+let googleScriptPromise: Promise<void> | undefined;
+
+function loadGoogleScript(): Promise<void> {
   if (window.google?.accounts.oauth2) {
     return Promise.resolve();
   }
 
-  if (!identityScriptPromise) {
-    identityScriptPromise = new Promise((resolve, reject) => {
+  if (!googleScriptPromise) {
+    googleScriptPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = "https://accounts.google.com/gsi/client";
       script.async = true;
@@ -99,23 +204,28 @@ function loadIdentityScript(): Promise<void> {
     });
   }
 
-  return identityScriptPromise;
+  return googleScriptPromise;
 }
 
-export async function authorizeGoogle(clientId: string, prompt: "" | "consent" = ""): Promise<string> {
+async function requestGoogleAccessToken(
+  clientId: string,
+  scope: string,
+  prompt: GooglePrompt,
+  cancelMessage: string
+): Promise<string> {
   if (!clientId) {
     throw new GoogleApiError("Missing Google OAuth client ID.");
   }
 
-  await loadIdentityScript();
+  await loadGoogleScript();
 
   return new Promise((resolve, reject) => {
     const tokenClient = window.google?.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: SCOPES,
+      scope,
       callback: (response) => {
         if (response.error || !response.access_token) {
-          reject(new GoogleApiError(response.error_description ?? "Google sign-in was cancelled."));
+          reject(new GoogleApiError(response.error_description ?? cancelMessage));
           return;
         }
 
@@ -125,6 +235,25 @@ export async function authorizeGoogle(clientId: string, prompt: "" | "consent" =
 
     tokenClient?.requestAccessToken({ prompt });
   });
+}
+
+export async function signInWithGoogle(clientId: string): Promise<GoogleUser> {
+  const accessToken = await requestGoogleAccessToken(
+    clientId,
+    PROFILE_SCOPES,
+    "select_account",
+    "Google sign-in was cancelled."
+  );
+  const user = parseGoogleUser(
+    await googleFetch<unknown>(accessToken, "https://openidconnect.googleapis.com/v1/userinfo")
+  );
+
+  saveStoredGoogleUser(user);
+  return user;
+}
+
+export async function authorizeGoogle(clientId: string, prompt: "" | "consent" = ""): Promise<string> {
+  return requestGoogleAccessToken(clientId, SCOPES, prompt, "Google sign-in was cancelled.");
 }
 
 async function googleFetch<T>(accessToken: string, url: string, init: RequestInit = {}): Promise<T> {
@@ -151,10 +280,10 @@ async function googleFetch<T>(accessToken: string, url: string, init: RequestIni
   return (await response.json()) as T;
 }
 
-async function findAppDataFile(accessToken: string): Promise<string | undefined> {
+async function findAppDataFile(accessToken: string, appDataFile: string): Promise<string | undefined> {
   const params = new URLSearchParams({
     spaces: "appDataFolder",
-    q: `name='${APP_DATA_FILE}' and trashed=false`,
+    q: `name='${appDataFile}' and trashed=false`,
     fields: "files(id,name)"
   });
 
@@ -166,8 +295,8 @@ async function findAppDataFile(accessToken: string): Promise<string | undefined>
   return result.files?.[0]?.id;
 }
 
-async function readSpreadsheetPointer(accessToken: string): Promise<string | undefined> {
-  const fileId = await findAppDataFile(accessToken);
+async function readSpreadsheetPointer(accessToken: string, config: SpreadsheetConfig): Promise<string | undefined> {
+  const fileId = await findAppDataFile(accessToken, config.appDataFile);
   if (!fileId) {
     return undefined;
   }
@@ -180,10 +309,10 @@ async function readSpreadsheetPointer(accessToken: string): Promise<string | und
   return pointer.spreadsheetId;
 }
 
-async function saveSpreadsheetPointer(accessToken: string, spreadsheetId: string): Promise<void> {
-  const fileId = await findAppDataFile(accessToken);
+async function saveSpreadsheetPointer(accessToken: string, spreadsheetId: string, config: SpreadsheetConfig): Promise<void> {
+  const fileId = await findAppDataFile(accessToken, config.appDataFile);
   const metadata = {
-    name: APP_DATA_FILE,
+    name: config.appDataFile,
     parents: ["appDataFolder"],
     mimeType: "application/json"
   };
@@ -213,14 +342,14 @@ async function saveSpreadsheetPointer(accessToken: string, spreadsheetId: string
   });
 }
 
-async function createTrackerSpreadsheet(accessToken: string): Promise<string> {
+async function createTrackerSpreadsheet(accessToken: string, config: SpreadsheetConfig): Promise<string> {
   const spreadsheet = await googleFetch<{ spreadsheetId: string }>(
     accessToken,
     "https://sheets.googleapis.com/v4/spreadsheets",
     {
       method: "POST",
       body: JSON.stringify({
-        properties: { title: SHEET_TITLE },
+        properties: { title: config.sheetTitle },
         sheets: [
           { properties: { title: "Settings" } },
           { properties: { title: "Meals" } },
@@ -235,18 +364,19 @@ async function createTrackerSpreadsheet(accessToken: string): Promise<string> {
     meals: [],
     favourites: []
   });
-  await saveSpreadsheetPointer(accessToken, spreadsheet.spreadsheetId);
+  await saveSpreadsheetPointer(accessToken, spreadsheet.spreadsheetId, config);
 
   return spreadsheet.spreadsheetId;
 }
 
-export async function ensureTrackerSpreadsheet(accessToken: string): Promise<string> {
-  const existingSpreadsheetId = await readSpreadsheetPointer(accessToken);
+export async function ensureTrackerSpreadsheet(accessToken: string, profile?: string): Promise<string> {
+  const config = spreadsheetConfigForProfile(profile);
+  const existingSpreadsheetId = await readSpreadsheetPointer(accessToken, config);
   if (existingSpreadsheetId) {
     return existingSpreadsheetId;
   }
 
-  return createTrackerSpreadsheet(accessToken);
+  return createTrackerSpreadsheet(accessToken, config);
 }
 
 function asNumber(value: unknown): number {
