@@ -23,6 +23,8 @@ import { FormEvent, useMemo, useState } from "react";
 import type {
   DailyStats,
   DailyStatsDraft,
+  EmotionEntry,
+  EmotionEntryDraft,
   FavouriteDraft,
   FavouriteMeal,
   Meal,
@@ -76,8 +78,10 @@ export interface TrackerShellProps {
   onSaveSettings: (settings: SettingsDraft) => Promise<void>;
   onSaveMeal: (meal: MealDraft) => Promise<void>;
   onSaveDailyStats: (stats: DailyStatsDraft) => Promise<void>;
+  onSaveEmotionEntry: (entry: EmotionEntryDraft) => Promise<void>;
   onEstimateMeal: (description: string) => Promise<MealEstimate>;
   onDeleteMeal: (meal: Meal) => Promise<void>;
+  onDeleteEmotionEntry: (entry: EmotionEntry) => Promise<void>;
   onSaveFavourite: (favourite: FavouriteDraft) => Promise<FavouriteMeal>;
   onDeleteFavourite: (favourite: FavouriteMeal) => Promise<void>;
 }
@@ -586,10 +590,170 @@ function DailyStatsForm({
   );
 }
 
+const EMOTION_OPTIONS = [
+  { emoji: "😢", feeling: "Sad" },
+  { emoji: "😡", feeling: "Angry" },
+  { emoji: "😫", feeling: "Frustrated" },
+  { emoji: "😊", feeling: "Happy" },
+  { emoji: "😬", feeling: "Anxious" },
+  { emoji: "🤞", feeling: "Hopeful" },
+  { emoji: "😁", feeling: "Excited" },
+  { emoji: "😩", feeling: "Hopeless" },
+  { emoji: "😌", feeling: "Calm" }
+] as const;
+
+function padTimePart(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function defaultEmotionTime(): string {
+  const now = new Date();
+  return `${padTimePart(now.getHours())}:${padTimePart(now.getMinutes())}`;
+}
+
+function toLocalDateTime(date: string, time: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const localDate = new Date(year, month - 1, day, hour || 0, minute || 0);
+
+  return Number.isNaN(localDate.getTime()) ? new Date().toISOString() : localDate.toISOString();
+}
+
+function formatEmotionTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}`;
+}
+
+function emotionEntriesForDate(entries: EmotionEntry[], date: string): EmotionEntry[] {
+  return entries
+    .filter((entry) => !entry.deletedAt && entry.date === date)
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+}
+
+function EmotionTracker({
+  selectedDate,
+  entries,
+  onSaveEmotionEntry,
+  onDeleteEmotionEntry
+}: {
+  selectedDate: string;
+  entries: EmotionEntry[];
+  onSaveEmotionEntry: (entry: EmotionEntryDraft) => Promise<void>;
+  onDeleteEmotionEntry: (entry: EmotionEntry) => Promise<void>;
+}) {
+  const [selectedFeeling, setSelectedFeeling] = useState("");
+  const [time, setTime] = useState(defaultEmotionTime);
+  const [status, setStatus] = useState("");
+  const selectedEmotion = EMOTION_OPTIONS.find((option) => option.feeling === selectedFeeling);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const recordedTime = String(formData.get("time") || time || defaultEmotionTime());
+
+    if (!selectedEmotion) {
+      return;
+    }
+
+    await onSaveEmotionEntry({
+      date: selectedDate,
+      occurredAt: toLocalDateTime(selectedDate, recordedTime),
+      emoji: selectedEmotion.emoji,
+      feeling: selectedEmotion.feeling
+    });
+    setSelectedFeeling("");
+    setTime(defaultEmotionTime());
+    setStatus("Emotion saved.");
+  }
+
+  return (
+    <section className="emotion-tracker" aria-label="Emotion tracker">
+      <form onSubmit={handleSubmit}>
+        <div className="form-title">
+          <h2>Emotion tracker</h2>
+          {status && <p className="inline-status">{status}</p>}
+        </div>
+        <div className="emotion-grid" role="group" aria-label="Feelings">
+          {EMOTION_OPTIONS.map((option) => (
+            <button
+              key={option.feeling}
+              type="button"
+              className={classNames("emotion-option", selectedFeeling === option.feeling && "is-selected")}
+              onClick={() => {
+                setSelectedFeeling(option.feeling);
+                setStatus("");
+              }}
+              aria-label={option.feeling}
+              aria-pressed={selectedFeeling === option.feeling}
+            >
+              <span className="emotion-option__emoji" aria-hidden="true">
+                {option.emoji}
+              </span>
+              <span>{option.feeling}</span>
+            </button>
+          ))}
+        </div>
+        <div className="emotion-actions">
+          <label className="field">
+            <span>Time</span>
+            <input
+              name="time"
+              type="time"
+              value={time}
+              onChange={(event) => {
+                setTime(event.currentTarget.value);
+                setStatus("");
+              }}
+            />
+          </label>
+          <button className="primary-button" type="submit" disabled={!selectedEmotion}>
+            <Save size={18} />
+            Save emotion
+          </button>
+        </div>
+      </form>
+
+      {entries.length === 0 ? (
+        <p className="empty-state">No emotions logged.</p>
+      ) : (
+        <div className="emotion-list" aria-label="Emotion timeline">
+          {entries.map((entry) => (
+            <article className="emotion-item" key={entry.id}>
+              <div className="emotion-item__emoji" aria-hidden="true">
+                {entry.emoji}
+              </div>
+              <div>
+                <h3>{entry.feeling}</h3>
+                <p>{formatEmotionTime(entry.occurredAt)}</p>
+              </div>
+              <div className="icon-actions">
+                <button
+                  type="button"
+                  onClick={() => onDeleteEmotionEntry(entry)}
+                  aria-label={`Delete ${entry.feeling} emotion`}
+                  title="Delete"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TodayView(props: TrackerShellProps) {
   const favourites = visibleFavourites(props.data.favourites);
   const dayMeals = mealsForDate(props.data.meals, props.selectedDate);
   const dailyStats = statsForDate(props.data.dailyStats, props.selectedDate);
+  const emotionEntries = emotionEntriesForDate(props.data.emotionEntries, props.selectedDate);
   const [editingMeal, setEditingMeal] = useState<Meal | undefined>();
   const total = sumNutrition(dayMeals);
 
@@ -602,6 +766,13 @@ function TodayView(props: TrackerShellProps) {
         selectedDate={props.selectedDate}
         stats={dailyStats}
         onSaveDailyStats={props.onSaveDailyStats}
+      />
+      <EmotionTracker
+        key={`emotions-${props.selectedDate}`}
+        selectedDate={props.selectedDate}
+        entries={emotionEntries}
+        onSaveEmotionEntry={props.onSaveEmotionEntry}
+        onDeleteEmotionEntry={props.onDeleteEmotionEntry}
       />
       <MealForm
         key={editingMeal?.id ?? `new-${props.selectedDate}`}

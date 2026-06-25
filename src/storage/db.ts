@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from "idb";
-import type { DailyStats, FavouriteMeal, LocalMeta, Meal, Settings, TrackerData } from "../types";
+import type { DailyStats, EmotionEntry, FavouriteMeal, LocalMeta, Meal, Settings, TrackerData } from "../types";
 import { DEFAULT_SETTINGS } from "../lib/nutrition";
 
 interface CalorieTrackerDB extends DBSchema {
@@ -18,6 +18,11 @@ interface CalorieTrackerDB extends DBSchema {
     value: DailyStats;
     indexes: { "by-date": string; "by-updated": string };
   };
+  emotionEntries: {
+    key: string;
+    value: EmotionEntry;
+    indexes: { "by-date": string; "by-updated": string };
+  };
   meta: {
     key: string;
     value: unknown;
@@ -25,7 +30,7 @@ interface CalorieTrackerDB extends DBSchema {
 }
 
 const DB_NAME = "calorie-tracker";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const dbPromise = openDB<CalorieTrackerDB>(DB_NAME, DB_VERSION, {
   upgrade(db) {
@@ -46,6 +51,12 @@ const dbPromise = openDB<CalorieTrackerDB>(DB_NAME, DB_VERSION, {
       dailyStats.createIndex("by-updated", "updatedAt");
     }
 
+    if (!db.objectStoreNames.contains("emotionEntries")) {
+      const emotionEntries = db.createObjectStore("emotionEntries", { keyPath: "id" });
+      emotionEntries.createIndex("by-date", "date");
+      emotionEntries.createIndex("by-updated", "updatedAt");
+    }
+
     if (!db.objectStoreNames.contains("meta")) {
       db.createObjectStore("meta");
     }
@@ -54,30 +65,33 @@ const dbPromise = openDB<CalorieTrackerDB>(DB_NAME, DB_VERSION, {
 
 export async function getTrackerData(): Promise<TrackerData> {
   const db = await dbPromise;
-  const [settings, meals, favourites, dailyStats] = await Promise.all([
+  const [settings, meals, favourites, dailyStats, emotionEntries] = await Promise.all([
     db.get("meta", "settings") as Promise<Settings | undefined>,
     db.getAll("meals"),
     db.getAll("favourites"),
-    db.getAll("dailyStats")
+    db.getAll("dailyStats"),
+    db.getAll("emotionEntries")
   ]);
 
   return {
     settings: settings ?? DEFAULT_SETTINGS,
     meals,
     favourites,
-    dailyStats
+    dailyStats,
+    emotionEntries
   };
 }
 
 export async function saveTrackerData(data: TrackerData): Promise<void> {
   const db = await dbPromise;
-  const tx = db.transaction(["meta", "meals", "favourites", "dailyStats"], "readwrite");
+  const tx = db.transaction(["meta", "meals", "favourites", "dailyStats", "emotionEntries"], "readwrite");
 
   await Promise.all([
     tx.objectStore("meta").put(data.settings, "settings"),
     ...data.meals.map((meal) => tx.objectStore("meals").put(meal)),
     ...data.favourites.map((favourite) => tx.objectStore("favourites").put(favourite)),
-    ...data.dailyStats.map((stats) => tx.objectStore("dailyStats").put(stats))
+    ...data.dailyStats.map((stats) => tx.objectStore("dailyStats").put(stats)),
+    ...data.emotionEntries.map((entry) => tx.objectStore("emotionEntries").put(entry))
   ]);
 
   await tx.done;
@@ -101,6 +115,11 @@ export async function saveFavourite(favourite: FavouriteMeal): Promise<void> {
 export async function saveDailyStats(stats: DailyStats): Promise<void> {
   const db = await dbPromise;
   await db.put("dailyStats", stats);
+}
+
+export async function saveEmotionEntry(entry: EmotionEntry): Promise<void> {
+  const db = await dbPromise;
+  await db.put("emotionEntries", entry);
 }
 
 export async function getLocalMeta(): Promise<LocalMeta> {

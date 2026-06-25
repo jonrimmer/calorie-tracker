@@ -7,6 +7,7 @@ import {
   getTrackerData,
   saveFavourite as saveFavouriteRecord,
   saveDailyStats as saveDailyStatsRecord,
+  saveEmotionEntry as saveEmotionEntryRecord,
   saveLocalMeta,
   saveMeal as saveMealRecord,
   saveSettings as saveSettingsRecord,
@@ -30,6 +31,8 @@ import type {
   FavouriteMeal,
   DailyStats,
   DailyStatsDraft,
+  EmotionEntry,
+  EmotionEntryDraft,
   LocalMeta,
   Meal,
   MealDraft,
@@ -68,7 +71,8 @@ export default function App() {
     settings: DEFAULT_SETTINGS,
     meals: [],
     favourites: [],
-    dailyStats: []
+    dailyStats: [],
+    emotionEntries: []
   });
   const [meta, setMeta] = useState<LocalMeta>({});
   const [authUser, setAuthUser] = useState<GoogleUser | null>(() => getStoredGoogleUser());
@@ -324,6 +328,46 @@ export default function App() {
     [data, noteLocalChange]
   );
 
+  const saveEmotionEntry = useCallback(
+    async (draft: EmotionEntryDraft) => {
+      const now = new Date().toISOString();
+      const existing = draft.id ? data.emotionEntries.find((entry) => entry.id === draft.id) : undefined;
+      const entry: EmotionEntry = {
+        ...existing,
+        ...draft,
+        id: draft.id ?? newId("emotion"),
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        deletedAt: undefined
+      };
+      const emotionEntries = existing
+        ? data.emotionEntries.map((item) => (item.id === entry.id ? entry : item))
+        : [...data.emotionEntries, entry];
+      const nextData = { ...data, emotionEntries };
+
+      setData(nextData);
+      await saveEmotionEntryRecord(entry);
+      await noteLocalChange("Emotion saved.");
+    },
+    [data, noteLocalChange]
+  );
+
+  const deleteEmotionEntry = useCallback(
+    async (entry: EmotionEntry) => {
+      const now = new Date().toISOString();
+      const deleted = { ...entry, updatedAt: now, deletedAt: now };
+      const nextData = {
+        ...data,
+        emotionEntries: data.emotionEntries.map((item) => (item.id === entry.id ? deleted : item))
+      };
+
+      setData(nextData);
+      await saveEmotionEntryRecord(deleted);
+      await noteLocalChange("Emotion deleted.");
+    },
+    [data, noteLocalChange]
+  );
+
   const performGoogleSync = useCallback(
     async (spreadsheetId?: string, prompt: "" | "consent" = "", tokenOverride?: string) => {
       if (!navigator.onLine) {
@@ -494,8 +538,10 @@ export default function App() {
       onSaveSettings={saveSettings}
       onSaveMeal={saveMeal}
       onSaveDailyStats={saveDailyStats}
+      onSaveEmotionEntry={saveEmotionEntry}
       onEstimateMeal={estimateMeal}
       onDeleteMeal={deleteMeal}
+      onDeleteEmotionEntry={deleteEmotionEntry}
       onSaveFavourite={saveFavourite}
       onDeleteFavourite={deleteFavourite}
     />

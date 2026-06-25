@@ -49,11 +49,23 @@ export interface DailyStats {
   deletedAt?: ISODateTime;
 }
 
+export interface EmotionEntry {
+  id: string;
+  date: ISODate;
+  occurredAt: ISODateTime;
+  emoji: string;
+  feeling: string;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  deletedAt?: ISODateTime;
+}
+
 export interface TrackerData {
   settings: Settings;
   meals: Meal[];
   favourites: FavouriteMeal[];
   dailyStats: DailyStats[];
+  emotionEntries: EmotionEntry[];
 }
 
 export interface LocalMeta {
@@ -96,3 +108,7 @@ export type FavouriteDraft = Omit<FavouriteMeal, "id" | "createdAt" | "updatedAt
 export type SettingsDraft = Omit<Settings, "schemaVersion" | "updatedAt">;
 
 export type DailyStatsDraft = Omit<DailyStats, "id" | "createdAt" | "updatedAt" | "deletedAt">;
+
+export type EmotionEntryDraft = Omit<EmotionEntry, "id" | "createdAt" | "updatedAt" | "deletedAt"> & {
+  id?: string;
+};

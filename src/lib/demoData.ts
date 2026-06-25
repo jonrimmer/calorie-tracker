@@ -49,6 +49,17 @@ export function createDemoData(now = new Date()): TrackerData {
         createdAt,
         updatedAt: createdAt
       }
+    ],
+    emotionEntries: [
+      {
+        id: "demo-emotion-1",
+        date: today,
+        occurredAt: createdAt,
+        emoji: "😊",
+        feeling: "Happy",
+        createdAt,
+        updatedAt: createdAt
+      }
     ]
   };
 }

@@ -1,4 +1,4 @@
-import type { DailyStats, FavouriteMeal, Meal, Settings, TrackerData } from "../types";
+import type { DailyStats, EmotionEntry, FavouriteMeal, Meal, Settings, TrackerData } from "../types";
 import { DEFAULT_SETTINGS } from "../lib/nutrition";
 
 const SHEET_TITLE = "Calorie Tracker";
@@ -48,6 +48,19 @@ const FAVOURITE_HEADERS = [
 ] as const;
 
 const DAILY_STATS_HEADERS = ["id", "date", "anxiety", "energy", "createdAt", "updatedAt", "deletedAt"] as const;
+
+const EMOTION_ENTRY_HEADERS = [
+  "id",
+  "date",
+  "occurredAt",
+  "emoji",
+  "feeling",
+  "createdAt",
+  "updatedAt",
+  "deletedAt"
+] as const;
+
+const REQUIRED_DATA_SHEETS = ["DailyStats", "EmotionEntries"] as const;
 
 interface TokenResponse {
   access_token?: string;
@@ -356,7 +369,8 @@ async function createTrackerSpreadsheet(accessToken: string, config: Spreadsheet
           { properties: { title: "Settings" } },
           { properties: { title: "Meals" } },
           { properties: { title: "Favourites" } },
-          { properties: { title: "DailyStats" } }
+          { properties: { title: "DailyStats" } },
+          { properties: { title: "EmotionEntries" } }
         ]
       })
     }
@@ -366,7 +380,8 @@ async function createTrackerSpreadsheet(accessToken: string, config: Spreadsheet
     settings: { ...DEFAULT_SETTINGS, updatedAt: new Date().toISOString() },
     meals: [],
     favourites: [],
-    dailyStats: []
+    dailyStats: [],
+    emotionEntries: []
   });
   await saveSpreadsheetPointer(accessToken, spreadsheet.spreadsheetId, config);
 
@@ -470,48 +485,66 @@ function parseDailyStats(rows: unknown[][] = []): DailyStats[] {
     });
 }
 
-async function ensureDailyStatsSheet(accessToken: string, spreadsheetId: string): Promise<void> {
+function parseEmotionEntries(rows: unknown[][] = []): EmotionEntry[] {
+  return mapRows(EMOTION_ENTRY_HEADERS, rows)
+    .filter((record) => record.id)
+    .map((record) => ({
+      id: record.id,
+      date: record.date,
+      occurredAt: record.occurredAt,
+      emoji: record.emoji,
+      feeling: record.feeling,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      deletedAt: record.deletedAt || undefined
+    }));
+}
+
+async function ensureDataSheets(accessToken: string, spreadsheetId: string): Promise<void> {
   const spreadsheet = await googleFetch<{ sheets?: Array<{ properties?: { title?: string } }> }>(
     accessToken,
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`
   );
+  const existingTitles = new Set(spreadsheet.sheets?.map((sheet) => sheet.properties?.title).filter(Boolean));
+  const missingTitles = REQUIRED_DATA_SHEETS.filter((title) => !existingTitles.has(title));
 
-  if (spreadsheet.sheets?.some((sheet) => sheet.properties?.title === "DailyStats")) {
+  if (missingTitles.length === 0) {
     return;
   }
 
   await googleFetch<void>(accessToken, `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({
-      requests: [
-        {
-          addSheet: {
-            properties: { title: "DailyStats" }
-          }
+      requests: missingTitles.map((title) => ({
+        addSheet: {
+          properties: { title }
         }
-      ]
+      }))
     })
   });
 }
 
 export async function readSheetData(accessToken: string, spreadsheetId: string): Promise<TrackerData> {
-  await ensureDailyStatsSheet(accessToken, spreadsheetId);
+  await ensureDataSheets(accessToken, spreadsheetId);
 
   const params = new URLSearchParams();
-  ["Settings!A1:F2", "Meals!A1:K", "Favourites!A1:I", "DailyStats!A1:G"].forEach((range) => params.append("ranges", range));
+  ["Settings!A1:F2", "Meals!A1:K", "Favourites!A1:I", "DailyStats!A1:G", "EmotionEntries!A1:H"].forEach((range) =>
+    params.append("ranges", range)
+  );
   params.set("majorDimension", "ROWS");
 
   const response = await googleFetch<{
     valueRanges?: Array<{ range: string; values?: unknown[][] }>;
   }>(accessToken, `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${params}`);
 
-  const [settingsRange, mealsRange, favouritesRange, dailyStatsRange] = response.valueRanges ?? [];
+  const [settingsRange, mealsRange, favouritesRange, dailyStatsRange, emotionEntriesRange] = response.valueRanges ?? [];
 
   return {
     settings: parseSettings(settingsRange?.values),
     meals: parseMeals(mealsRange?.values),
     favourites: parseFavourites(favouritesRange?.values),
-    dailyStats: parseDailyStats(dailyStatsRange?.values)
+    dailyStats: parseDailyStats(dailyStatsRange?.values),
+    emotionEntries: parseEmotionEntries(emotionEntriesRange?.values)
   };
 }
 
@@ -580,8 +613,24 @@ function dailyStatsRows(dailyStats: DailyStats[]): unknown[][] {
   ];
 }
 
+function emotionEntryRows(emotionEntries: EmotionEntry[]): unknown[][] {
+  return [
+    [...EMOTION_ENTRY_HEADERS],
+    ...emotionEntries.map((entry) => [
+      entry.id,
+      entry.date,
+      entry.occurredAt,
+      entry.emoji,
+      entry.feeling,
+      entry.createdAt,
+      entry.updatedAt,
+      entry.deletedAt ?? ""
+    ])
+  ];
+}
+
 export async function writeSheetData(accessToken: string, spreadsheetId: string, data: TrackerData): Promise<void> {
-  await ensureDailyStatsSheet(accessToken, spreadsheetId);
+  await ensureDataSheets(accessToken, spreadsheetId);
 
   await googleFetch<void>(
     accessToken,
@@ -589,7 +638,7 @@ export async function writeSheetData(accessToken: string, spreadsheetId: string,
     {
       method: "POST",
       body: JSON.stringify({
-        ranges: ["Settings!A1:F", "Meals!A1:K", "Favourites!A1:I", "DailyStats!A1:G"]
+        ranges: ["Settings!A1:F", "Meals!A1:K", "Favourites!A1:I", "DailyStats!A1:G", "EmotionEntries!A1:H"]
       })
     }
   );
@@ -605,7 +654,8 @@ export async function writeSheetData(accessToken: string, spreadsheetId: string,
           { range: "Settings!A1:F2", values: settingsRows(data.settings) },
           { range: "Meals!A1:K", values: mealRows(data.meals) },
           { range: "Favourites!A1:I", values: favouriteRows(data.favourites) },
-          { range: "DailyStats!A1:G", values: dailyStatsRows(data.dailyStats) }
+          { range: "DailyStats!A1:G", values: dailyStatsRows(data.dailyStats) },
+          { range: "EmotionEntries!A1:H", values: emotionEntryRows(data.emotionEntries) }
         ]
       })
     }

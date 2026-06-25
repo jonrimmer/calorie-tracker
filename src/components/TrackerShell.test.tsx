@@ -7,6 +7,8 @@ import type {
   FavouriteMeal,
   DailyStats,
   DailyStatsDraft,
+  EmotionEntry,
+  EmotionEntryDraft,
   Meal,
   MealDraft,
   MealEstimate,
@@ -30,7 +32,8 @@ function makeData(): TrackerData {
     },
     meals: [],
     favourites: [],
-    dailyStats: []
+    dailyStats: [],
+    emotionEntries: []
   };
 }
 
@@ -120,11 +123,38 @@ function Harness({
         };
       });
     },
+    onSaveEmotionEntry: async (entry: EmotionEntryDraft) => {
+      setData((current) => {
+        const existing = entry.id ? current.emotionEntries.find((item) => item.id === entry.id) : undefined;
+        const saved: EmotionEntry = {
+          ...existing,
+          ...entry,
+          id: entry.id ?? `emotion-${current.emotionEntries.length + 1}`,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          deletedAt: undefined
+        };
+        return {
+          ...current,
+          emotionEntries: existing
+            ? current.emotionEntries.map((item) => (item.id === saved.id ? saved : item))
+            : [...current.emotionEntries, saved]
+        };
+      });
+    },
     onEstimateMeal,
     onDeleteMeal: async (meal: Meal) => {
       setData((current) => ({
         ...current,
         meals: current.meals.map((item) => (item.id === meal.id ? { ...item, deletedAt: now, updatedAt: now } : item))
+      }));
+    },
+    onDeleteEmotionEntry: async (entry: EmotionEntry) => {
+      setData((current) => ({
+        ...current,
+        emotionEntries: current.emotionEntries.map((item) =>
+          item.id === entry.id ? { ...item, deletedAt: now, updatedAt: now } : item
+        )
       }));
     },
     onSaveFavourite: async (favourite: FavouriteDraft) => {
@@ -241,6 +271,24 @@ describe("TrackerShell", () => {
     expect(await screen.findByText("Stats saved.")).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: /Anxiety/i })).toHaveValue("8");
     expect(screen.getByRole("slider", { name: /Energy/i })).toHaveValue("4");
+  });
+
+  it("logs and deletes an emotion moment", async () => {
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Happy" }));
+    fireEvent.change(screen.getByLabelText("Time"), { target: { value: "14:20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save emotion" }));
+
+    expect(await screen.findByText("Emotion saved.")).toBeInTheDocument();
+    const timeline = screen.getByLabelText("Emotion timeline");
+    expect(within(timeline).getByText("Happy")).toBeInTheDocument();
+    expect(within(timeline).getByText("14:20")).toBeInTheDocument();
+
+    fireEvent.click(within(timeline).getByRole("button", { name: "Delete Happy emotion" }));
+
+    await waitFor(() => expect(screen.queryByLabelText("Emotion timeline")).not.toBeInTheDocument());
+    expect(screen.getByText("No emotions logged.")).toBeInTheDocument();
   });
 
   it("saves and logs a favourite meal", async () => {

@@ -63,6 +63,17 @@ describe("sync merge", () => {
           createdAt: "2026-06-15T08:00:00.000Z",
           updatedAt: "2026-06-15T08:00:00.000Z"
         }
+      ],
+      emotionEntries: [
+        {
+          id: "emotion-1",
+          date: "2026-06-15",
+          occurredAt: "2026-06-15T11:30:00.000Z",
+          emoji: "😊",
+          feeling: "Happy",
+          createdAt: "2026-06-15T11:30:00.000Z",
+          updatedAt: "2026-06-15T11:30:00.000Z"
+        }
       ]
     };
     const remote: TrackerData = {
@@ -96,6 +107,17 @@ describe("sync merge", () => {
           createdAt: "2026-06-15T07:00:00.000Z",
           updatedAt: "2026-06-15T12:30:00.000Z"
         }
+      ],
+      emotionEntries: [
+        {
+          id: "emotion-2",
+          date: "2026-06-15",
+          occurredAt: "2026-06-15T12:10:00.000Z",
+          emoji: "😌",
+          feeling: "Calm",
+          createdAt: "2026-06-15T12:10:00.000Z",
+          updatedAt: "2026-06-15T12:10:00.000Z"
+        }
       ]
     };
 
@@ -105,5 +127,6 @@ describe("sync merge", () => {
     expect(merged.meals[0].name).toBe("Local");
     expect(merged.favourites[0].name).toBe("Shake");
     expect(merged.dailyStats[0].anxiety).toBe(7);
+    expect(merged.emotionEntries.map((entry) => entry.feeling)).toEqual(["Happy", "Calm"]);
   });
 });
