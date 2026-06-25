@@ -5,6 +5,8 @@ import { TrackerShell, type TrackerShellProps } from "./TrackerShell";
 import type {
   FavouriteDraft,
   FavouriteMeal,
+  DailyStats,
+  DailyStatsDraft,
   Meal,
   MealDraft,
   MealEstimate,
@@ -27,7 +29,8 @@ function makeData(): TrackerData {
       updatedAt: now
     },
     meals: [],
-    favourites: []
+    favourites: [],
+    dailyStats: []
   };
 }
 
@@ -95,6 +98,25 @@ function Harness({
         return {
           ...current,
           meals: existing ? current.meals.map((item) => (item.id === saved.id ? saved : item)) : [...current.meals, saved]
+        };
+      });
+    },
+    onSaveDailyStats: async (stats: DailyStatsDraft) => {
+      setData((current) => {
+        const existing = current.dailyStats.find((item) => item.id === stats.date);
+        const saved: DailyStats = {
+          ...existing,
+          ...stats,
+          id: stats.date,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          deletedAt: undefined
+        };
+        return {
+          ...current,
+          dailyStats: existing
+            ? current.dailyStats.map((item) => (item.id === saved.id ? saved : item))
+            : [...current.dailyStats, saved]
         };
       });
     },
@@ -207,6 +229,18 @@ describe("TrackerShell", () => {
     expect(screen.getByLabelText("Protein")).toHaveDisplayValue("45");
     expect(screen.getByLabelText("Carbs")).toHaveDisplayValue("82");
     expect(screen.getByLabelText("Fat")).toHaveDisplayValue("20");
+  });
+
+  it("tracks daily anxiety and energy", async () => {
+    render(<Harness />);
+
+    fireEvent.change(screen.getByRole("slider", { name: /Anxiety/i }), { target: { value: "8" } });
+    fireEvent.change(screen.getByRole("slider", { name: /Energy/i }), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save stats" }));
+
+    expect(await screen.findByText("Stats saved.")).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: /Anxiety/i })).toHaveValue("8");
+    expect(screen.getByRole("slider", { name: /Energy/i })).toHaveValue("4");
   });
 
   it("saves and logs a favourite meal", async () => {

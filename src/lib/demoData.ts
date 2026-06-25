@@ -39,6 +39,16 @@ export function createDemoData(now = new Date()): TrackerData {
         createdAt,
         updatedAt: createdAt
       }
+    ],
+    dailyStats: [
+      {
+        id: today,
+        date: today,
+        anxiety: 3,
+        energy: 7,
+        createdAt,
+        updatedAt: createdAt
+      }
     ]
   };
 }

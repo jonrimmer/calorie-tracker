@@ -6,6 +6,7 @@ import {
   getLocalMeta,
   getTrackerData,
   saveFavourite as saveFavouriteRecord,
+  saveDailyStats as saveDailyStatsRecord,
   saveLocalMeta,
   saveMeal as saveMealRecord,
   saveSettings as saveSettingsRecord,
@@ -27,6 +28,8 @@ import { syncRequestForMeta } from "./lib/syncMode";
 import type {
   FavouriteDraft,
   FavouriteMeal,
+  DailyStats,
+  DailyStatsDraft,
   LocalMeta,
   Meal,
   MealDraft,
@@ -64,7 +67,8 @@ export default function App() {
   const [data, setData] = useState<TrackerData>({
     settings: DEFAULT_SETTINGS,
     meals: [],
-    favourites: []
+    favourites: [],
+    dailyStats: []
   });
   const [meta, setMeta] = useState<LocalMeta>({});
   const [authUser, setAuthUser] = useState<GoogleUser | null>(() => getStoredGoogleUser());
@@ -296,6 +300,30 @@ export default function App() {
     [data, noteLocalChange]
   );
 
+  const saveDailyStats = useCallback(
+    async (draft: DailyStatsDraft) => {
+      const now = new Date().toISOString();
+      const existing = data.dailyStats.find((stats) => stats.id === draft.date);
+      const stats: DailyStats = {
+        ...existing,
+        ...draft,
+        id: draft.date,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        deletedAt: undefined
+      };
+      const dailyStats = existing
+        ? data.dailyStats.map((item) => (item.id === stats.id ? stats : item))
+        : [...data.dailyStats, stats];
+      const nextData = { ...data, dailyStats };
+
+      setData(nextData);
+      await saveDailyStatsRecord(stats);
+      await noteLocalChange("Stats saved.");
+    },
+    [data, noteLocalChange]
+  );
+
   const performGoogleSync = useCallback(
     async (spreadsheetId?: string, prompt: "" | "consent" = "", tokenOverride?: string) => {
       if (!navigator.onLine) {
@@ -465,6 +493,7 @@ export default function App() {
       onStartLocalMode={startLocalMode}
       onSaveSettings={saveSettings}
       onSaveMeal={saveMeal}
+      onSaveDailyStats={saveDailyStats}
       onEstimateMeal={estimateMeal}
       onDeleteMeal={deleteMeal}
       onSaveFavourite={saveFavourite}

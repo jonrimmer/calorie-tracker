@@ -42,7 +42,7 @@ describe("sync merge", () => {
     expect(mergeRecords(local, remote)[0].deletedAt).toBe("2026-06-15T11:00:00.000Z");
   });
 
-  it("merges settings, meals, and favourites together", () => {
+  it("merges settings, meals, favourites, and daily stats together", () => {
     const local: TrackerData = {
       settings: {
         schemaVersion: 1,
@@ -53,7 +53,17 @@ describe("sync merge", () => {
         updatedAt: "2026-06-15T12:00:00.000Z"
       },
       meals: [{ ...baseMeal, name: "Local", updatedAt: "2026-06-15T12:00:00.000Z" }],
-      favourites: []
+      favourites: [],
+      dailyStats: [
+        {
+          id: "2026-06-15",
+          date: "2026-06-15",
+          anxiety: 4,
+          energy: 8,
+          createdAt: "2026-06-15T08:00:00.000Z",
+          updatedAt: "2026-06-15T08:00:00.000Z"
+        }
+      ]
     };
     const remote: TrackerData = {
       settings: {
@@ -76,6 +86,16 @@ describe("sync merge", () => {
           createdAt: "2026-06-15T07:00:00.000Z",
           updatedAt: "2026-06-15T07:00:00.000Z"
         }
+      ],
+      dailyStats: [
+        {
+          id: "2026-06-15",
+          date: "2026-06-15",
+          anxiety: 7,
+          energy: 3,
+          createdAt: "2026-06-15T07:00:00.000Z",
+          updatedAt: "2026-06-15T12:30:00.000Z"
+        }
       ]
     };
 
@@ -84,5 +104,6 @@ describe("sync merge", () => {
     expect(merged.settings.calorieTarget).toBe(3200);
     expect(merged.meals[0].name).toBe("Local");
     expect(merged.favourites[0].name).toBe("Shake");
+    expect(merged.dailyStats[0].anxiety).toBe(7);
   });
 });

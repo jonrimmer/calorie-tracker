@@ -1,4 +1,4 @@
-import type { FavouriteMeal, Meal, Settings, SyncRecord, TrackerData } from "../types";
+import type { DailyStats, FavouriteMeal, Meal, Settings, SyncRecord, TrackerData } from "../types";
 import { DEFAULT_SETTINGS } from "./nutrition";
 
 function newestTimestamp(record: SyncRecord): string {
@@ -34,6 +34,7 @@ export function mergeTrackerData(local: TrackerData, remote?: Partial<TrackerDat
   return {
     settings: mergeSettings(local.settings, remote?.settings ?? DEFAULT_SETTINGS),
     meals: mergeRecords<Meal>(local.meals, remote?.meals ?? []),
-    favourites: mergeRecords<FavouriteMeal>(local.favourites, remote?.favourites ?? [])
+    favourites: mergeRecords<FavouriteMeal>(local.favourites, remote?.favourites ?? []),
+    dailyStats: mergeRecords<DailyStats>(local.dailyStats, remote?.dailyStats ?? [])
   };
 }

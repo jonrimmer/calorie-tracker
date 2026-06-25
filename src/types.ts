@@ -39,10 +39,21 @@ export interface FavouriteMeal extends Nutrition {
   deletedAt?: ISODateTime;
 }
 
+export interface DailyStats {
+  id: string;
+  date: ISODate;
+  anxiety: number;
+  energy: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  deletedAt?: ISODateTime;
+}
+
 export interface TrackerData {
   settings: Settings;
   meals: Meal[];
   favourites: FavouriteMeal[];
+  dailyStats: DailyStats[];
 }
 
 export interface LocalMeta {
@@ -83,3 +94,5 @@ export type FavouriteDraft = Omit<FavouriteMeal, "id" | "createdAt" | "updatedAt
 };
 
 export type SettingsDraft = Omit<Settings, "schemaVersion" | "updatedAt">;
+
+export type DailyStatsDraft = Omit<DailyStats, "id" | "createdAt" | "updatedAt" | "deletedAt">;

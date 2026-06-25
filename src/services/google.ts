@@ -1,4 +1,4 @@
-import type { FavouriteMeal, Meal, Settings, TrackerData } from "../types";
+import type { DailyStats, FavouriteMeal, Meal, Settings, TrackerData } from "../types";
 import { DEFAULT_SETTINGS } from "../lib/nutrition";
 
 const SHEET_TITLE = "Calorie Tracker";
@@ -46,6 +46,8 @@ const FAVOURITE_HEADERS = [
   "updatedAt",
   "deletedAt"
 ] as const;
+
+const DAILY_STATS_HEADERS = ["id", "date", "anxiety", "energy", "createdAt", "updatedAt", "deletedAt"] as const;
 
 interface TokenResponse {
   access_token?: string;
@@ -353,7 +355,8 @@ async function createTrackerSpreadsheet(accessToken: string, config: Spreadsheet
         sheets: [
           { properties: { title: "Settings" } },
           { properties: { title: "Meals" } },
-          { properties: { title: "Favourites" } }
+          { properties: { title: "Favourites" } },
+          { properties: { title: "DailyStats" } }
         ]
       })
     }
@@ -362,7 +365,8 @@ async function createTrackerSpreadsheet(accessToken: string, config: Spreadsheet
   await writeSheetData(accessToken, spreadsheet.spreadsheetId, {
     settings: { ...DEFAULT_SETTINGS, updatedAt: new Date().toISOString() },
     meals: [],
-    favourites: []
+    favourites: [],
+    dailyStats: []
   });
   await saveSpreadsheetPointer(accessToken, spreadsheet.spreadsheetId, config);
 
@@ -444,21 +448,70 @@ function parseFavourites(rows: unknown[][] = []): FavouriteMeal[] {
     }));
 }
 
+function readStatValue(value: unknown): number {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) ? Math.min(10, Math.max(1, parsed)) : 5;
+}
+
+function parseDailyStats(rows: unknown[][] = []): DailyStats[] {
+  return mapRows(DAILY_STATS_HEADERS, rows)
+    .filter((record) => record.id || record.date)
+    .map((record) => {
+      const date = record.date || record.id;
+      return {
+        id: record.id || date,
+        date,
+        anxiety: readStatValue(record.anxiety),
+        energy: readStatValue(record.energy),
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+        deletedAt: record.deletedAt || undefined
+      };
+    });
+}
+
+async function ensureDailyStatsSheet(accessToken: string, spreadsheetId: string): Promise<void> {
+  const spreadsheet = await googleFetch<{ sheets?: Array<{ properties?: { title?: string } }> }>(
+    accessToken,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`
+  );
+
+  if (spreadsheet.sheets?.some((sheet) => sheet.properties?.title === "DailyStats")) {
+    return;
+  }
+
+  await googleFetch<void>(accessToken, `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [
+        {
+          addSheet: {
+            properties: { title: "DailyStats" }
+          }
+        }
+      ]
+    })
+  });
+}
+
 export async function readSheetData(accessToken: string, spreadsheetId: string): Promise<TrackerData> {
+  await ensureDailyStatsSheet(accessToken, spreadsheetId);
+
   const params = new URLSearchParams();
-  ["Settings!A1:F2", "Meals!A1:K", "Favourites!A1:I"].forEach((range) => params.append("ranges", range));
+  ["Settings!A1:F2", "Meals!A1:K", "Favourites!A1:I", "DailyStats!A1:G"].forEach((range) => params.append("ranges", range));
   params.set("majorDimension", "ROWS");
 
   const response = await googleFetch<{
     valueRanges?: Array<{ range: string; values?: unknown[][] }>;
   }>(accessToken, `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${params}`);
 
-  const [settingsRange, mealsRange, favouritesRange] = response.valueRanges ?? [];
+  const [settingsRange, mealsRange, favouritesRange, dailyStatsRange] = response.valueRanges ?? [];
 
   return {
     settings: parseSettings(settingsRange?.values),
     meals: parseMeals(mealsRange?.values),
-    favourites: parseFavourites(favouritesRange?.values)
+    favourites: parseFavourites(favouritesRange?.values),
+    dailyStats: parseDailyStats(dailyStatsRange?.values)
   };
 }
 
@@ -512,14 +565,31 @@ function favouriteRows(favourites: FavouriteMeal[]): unknown[][] {
   ];
 }
 
+function dailyStatsRows(dailyStats: DailyStats[]): unknown[][] {
+  return [
+    [...DAILY_STATS_HEADERS],
+    ...dailyStats.map((stats) => [
+      stats.id,
+      stats.date,
+      stats.anxiety,
+      stats.energy,
+      stats.createdAt,
+      stats.updatedAt,
+      stats.deletedAt ?? ""
+    ])
+  ];
+}
+
 export async function writeSheetData(accessToken: string, spreadsheetId: string, data: TrackerData): Promise<void> {
+  await ensureDailyStatsSheet(accessToken, spreadsheetId);
+
   await googleFetch<void>(
     accessToken,
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
     {
       method: "POST",
       body: JSON.stringify({
-        ranges: ["Settings!A1:F", "Meals!A1:K", "Favourites!A1:I"]
+        ranges: ["Settings!A1:F", "Meals!A1:K", "Favourites!A1:I", "DailyStats!A1:G"]
       })
     }
   );
@@ -534,7 +604,8 @@ export async function writeSheetData(accessToken: string, spreadsheetId: string,
         data: [
           { range: "Settings!A1:F2", values: settingsRows(data.settings) },
           { range: "Meals!A1:K", values: mealRows(data.meals) },
-          { range: "Favourites!A1:I", values: favouriteRows(data.favourites) }
+          { range: "Favourites!A1:I", values: favouriteRows(data.favourites) },
+          { range: "DailyStats!A1:G", values: dailyStatsRows(data.dailyStats) }
         ]
       })
     }

@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import type {
+  DailyStats,
+  DailyStatsDraft,
   FavouriteDraft,
   FavouriteMeal,
   Meal,
@@ -73,6 +75,7 @@ export interface TrackerShellProps {
   onStartLocalMode?: () => Promise<void>;
   onSaveSettings: (settings: SettingsDraft) => Promise<void>;
   onSaveMeal: (meal: MealDraft) => Promise<void>;
+  onSaveDailyStats: (stats: DailyStatsDraft) => Promise<void>;
   onEstimateMeal: (description: string) => Promise<MealEstimate>;
   onDeleteMeal: (meal: Meal) => Promise<void>;
   onSaveFavourite: (favourite: FavouriteDraft) => Promise<FavouriteMeal>;
@@ -499,9 +502,94 @@ function MealList({
   );
 }
 
+function statsForDate(dailyStats: DailyStats[], date: string): DailyStats | undefined {
+  return dailyStats.find((stats) => !stats.deletedAt && stats.date === date);
+}
+
+function statValue(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(10, Math.max(1, Math.round(value))) : 5;
+}
+
+function DailyStatsForm({
+  selectedDate,
+  stats,
+  onSaveDailyStats
+}: {
+  selectedDate: string;
+  stats?: DailyStats;
+  onSaveDailyStats: (stats: DailyStatsDraft) => Promise<void>;
+}) {
+  const [values, setValues] = useState({
+    anxiety: statValue(stats?.anxiety),
+    energy: statValue(stats?.energy)
+  });
+  const [status, setStatus] = useState("");
+
+  function updateStat(field: "anxiety" | "energy", value: string) {
+    setValues((current) => ({ ...current, [field]: statValue(Number(value)) }));
+    setStatus("");
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSaveDailyStats({
+      date: selectedDate,
+      anxiety: values.anxiety,
+      energy: values.energy
+    });
+    setStatus("Stats saved.");
+  }
+
+  return (
+    <form className="daily-stats" onSubmit={handleSubmit} aria-label="Daily stats">
+      <div className="form-title">
+        <h2>Daily stats</h2>
+        {status && <p className="inline-status">{status}</p>}
+      </div>
+      <div className="stat-slider-grid">
+        <label className="stat-slider">
+          <span>
+            Anxiety <strong>{values.anxiety}</strong>
+          </span>
+          <input
+            name="anxiety"
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value={values.anxiety}
+            onChange={(event) => updateStat("anxiety", event.currentTarget.value)}
+          />
+        </label>
+        <label className="stat-slider">
+          <span>
+            Energy <strong>{values.energy}</strong>
+          </span>
+          <input
+            name="energy"
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value={values.energy}
+            onChange={(event) => updateStat("energy", event.currentTarget.value)}
+          />
+        </label>
+      </div>
+      <div className="form-actions form-actions--end">
+        <button className="primary-button" type="submit">
+          <Save size={18} />
+          Save stats
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function TodayView(props: TrackerShellProps) {
   const favourites = visibleFavourites(props.data.favourites);
   const dayMeals = mealsForDate(props.data.meals, props.selectedDate);
+  const dailyStats = statsForDate(props.data.dailyStats, props.selectedDate);
   const [editingMeal, setEditingMeal] = useState<Meal | undefined>();
   const total = sumNutrition(dayMeals);
 
@@ -509,6 +597,12 @@ function TodayView(props: TrackerShellProps) {
     <>
       <DateStepper selectedDate={props.selectedDate} onSelectDate={props.onSelectDate} />
       <Dashboard title="Today" subtitle={formatShortDate(props.selectedDate)} consumed={total} target={dailyTarget(props.data.settings)} />
+      <DailyStatsForm
+        key={props.selectedDate}
+        selectedDate={props.selectedDate}
+        stats={dailyStats}
+        onSaveDailyStats={props.onSaveDailyStats}
+      />
       <MealForm
         key={editingMeal?.id ?? `new-${props.selectedDate}`}
         selectedDate={props.selectedDate}

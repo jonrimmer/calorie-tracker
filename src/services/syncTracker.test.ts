@@ -24,7 +24,17 @@ const localData: TrackerData = {
       updatedAt: "2026-06-15T12:00:00.000Z"
     }
   ],
-  favourites: []
+  favourites: [],
+  dailyStats: [
+    {
+      id: "2026-06-15",
+      date: "2026-06-15",
+      anxiety: 4,
+      energy: 7,
+      createdAt: "2026-06-15T08:00:00.000Z",
+      updatedAt: "2026-06-15T08:00:00.000Z"
+    }
+  ]
 };
 
 const remoteData: TrackerData = {
@@ -37,7 +47,8 @@ const remoteData: TrackerData = {
     updatedAt: "2026-06-15T10:00:00.000Z"
   },
   meals: [],
-  favourites: []
+  favourites: [],
+  dailyStats: []
 };
 
 describe("syncTrackerData", () => {
@@ -65,6 +76,7 @@ describe("syncTrackerData", () => {
     expect(writtenData?.settings.calorieTarget).toBe(3200);
     expect(writtenData?.meals).toHaveLength(1);
     expect(writtenData?.meals[0].name).toBe("Post-workout pasta");
+    expect(writtenData?.dailyStats[0].energy).toBe(7);
     expect(result.meta).toMatchObject({
       spreadsheetId: "sheet-1",
       lastSyncAt: "2026-06-15T12:01:00.000Z",
