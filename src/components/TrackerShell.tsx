@@ -49,7 +49,7 @@ import {
   visibleFavourites,
   weeklyTarget
 } from "../lib/nutrition";
-import { addDays, formatShortDate, formatWeekRange, getWeekDates, toISODate } from "../lib/date";
+import { addDays, formatRelativeDayLabel, formatShortDate, formatWeekRange, getWeekDates, toISODate } from "../lib/date";
 
 type TabId = "today" | "week" | "favourites" | "targets";
 
@@ -788,7 +788,12 @@ function TodayView(props: TrackerShellProps) {
   return (
     <>
       <DateStepper selectedDate={props.selectedDate} onSelectDate={props.onSelectDate} />
-      <Dashboard title="Today" subtitle={formatShortDate(props.selectedDate)} consumed={total} target={dailyTarget(props.data.settings)} />
+      <Dashboard
+        title={formatRelativeDayLabel(props.selectedDate)}
+        subtitle={formatShortDate(props.selectedDate)}
+        consumed={total}
+        target={dailyTarget(props.data.settings)}
+      />
       <DailyStatsForm
         key={props.selectedDate}
         selectedDate={props.selectedDate}

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrackerShell, type TrackerShellProps } from "./TrackerShell";
 import type {
   FavouriteDraft,
@@ -203,6 +203,10 @@ function fillMeal(name: string) {
 }
 
 describe("TrackerShell", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("shows Google sign-in before tracker setup", () => {
     const onSignIn = vi.fn();
     render(<Harness authUser={null} onSignIn={onSignIn} />);
@@ -237,6 +241,26 @@ describe("TrackerShell", () => {
 
     await waitFor(() => expect(screen.queryByText("Chicken wrap")).not.toBeInTheDocument());
     expect(screen.getByText("No meals logged.")).toBeInTheDocument();
+  });
+
+  it("labels the selected day relative to the current day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T10:00:00.000Z"));
+    render(<Harness initialDate="2026-06-15" />);
+
+    expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Selected date"), { target: { value: "2026-06-14" } });
+    expect(screen.getByRole("heading", { name: "Yesterday" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Selected date"), { target: { value: "2026-06-16" } });
+    expect(screen.getByRole("heading", { name: "Tomorrow" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Selected date"), { target: { value: "2026-06-12" } });
+    expect(screen.getByRole("heading", { name: "3 days ago" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Selected date"), { target: { value: "2026-06-18" } });
+    expect(screen.getByRole("heading", { name: "In 3 days" })).toBeInTheDocument();
   });
 
   it("adds a duplicate of a previous-day meal to today", async () => {

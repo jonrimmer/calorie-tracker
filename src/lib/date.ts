@@ -22,6 +22,33 @@ export function addDays(date: ISODate, days: number): ISODate {
   return toISODate(next);
 }
 
+function utcDayTime(date: ISODate): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+export function formatRelativeDayLabel(date: ISODate, relativeTo = toISODate()): string {
+  const dayDifference = Math.round((utcDayTime(date) - utcDayTime(relativeTo)) / 86_400_000);
+
+  if (dayDifference === 0) {
+    return "Today";
+  }
+
+  if (dayDifference === -1) {
+    return "Yesterday";
+  }
+
+  if (dayDifference === 1) {
+    return "Tomorrow";
+  }
+
+  if (dayDifference < 0) {
+    return `${Math.abs(dayDifference)} days ago`;
+  }
+
+  return `In ${dayDifference} days`;
+}
+
 export function startOfWeek(date: ISODate): ISODate {
   const parsed = parseISODate(date);
   const day = parsed.getDay();
