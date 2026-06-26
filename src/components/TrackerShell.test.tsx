@@ -16,6 +16,7 @@ import type {
   SyncState,
   TrackerData
 } from "../types";
+import { addDays, toISODate } from "../lib/date";
 
 const selectedDate = "2026-06-15";
 const now = "2026-06-15T10:00:00.000Z";
@@ -41,6 +42,7 @@ function Harness({
   authUser = { email: "jon@example.com" },
   authLoading = false,
   isConfigured = true,
+  initialDate = selectedDate,
   localModeActive = false,
   syncState = { phase: "ready", message: "Ready" },
   onSignIn = () => undefined,
@@ -56,6 +58,7 @@ function Harness({
   authUser?: TrackerShellProps["authUser"];
   authLoading?: boolean;
   isConfigured?: boolean;
+  initialDate?: string;
   localModeActive?: boolean;
   syncState?: SyncState;
   onSignIn?: () => void;
@@ -63,7 +66,7 @@ function Harness({
   onEstimateMeal?: (description: string) => Promise<MealEstimate>;
 } = {}) {
   const [data, setData] = useState<TrackerData>(makeData());
-  const [date, setDate] = useState(selectedDate);
+  const [date, setDate] = useState(initialDate);
 
   const props: TrackerShellProps = {
     authUser,
@@ -234,6 +237,23 @@ describe("TrackerShell", () => {
 
     await waitFor(() => expect(screen.queryByText("Chicken wrap")).not.toBeInTheDocument());
     expect(screen.getByText("No meals logged.")).toBeInTheDocument();
+  });
+
+  it("adds a duplicate of a previous-day meal to today", async () => {
+    const today = toISODate();
+    const previousDate = addDays(today, -1);
+    render(<Harness initialDate={previousDate} />);
+
+    fillMeal("Leftover curry");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("Leftover curry")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add Leftover curry to today" }));
+    fireEvent.change(screen.getByLabelText("Selected date"), { target: { value: today } });
+
+    const meals = await screen.findByLabelText("Meals");
+    expect(within(meals).getByText("Leftover curry")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Leftover curry to today" })).not.toBeInTheDocument();
   });
 
   it("estimates meal macros from a description", async () => {

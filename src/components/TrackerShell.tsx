@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  CalendarPlus,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -48,7 +49,7 @@ import {
   visibleFavourites,
   weeklyTarget
 } from "../lib/nutrition";
-import { addDays, formatShortDate, formatWeekRange, getWeekDates } from "../lib/date";
+import { addDays, formatShortDate, formatWeekRange, getWeekDates, toISODate } from "../lib/date";
 
 type TabId = "today" | "week" | "favourites" | "targets";
 
@@ -470,11 +471,15 @@ function MealForm({
 
 function MealList({
   meals,
+  today,
   onEditMeal,
+  onAddMealToToday,
   onDeleteMeal
 }: {
   meals: Meal[];
+  today: string;
   onEditMeal: (meal: Meal) => void;
+  onAddMealToToday: (meal: Meal) => Promise<void>;
   onDeleteMeal: (meal: Meal) => Promise<void>;
 }) {
   if (meals.length === 0) {
@@ -493,6 +498,16 @@ function MealList({
             </p>
           </div>
           <div className="icon-actions">
+            {meal.date < today && (
+              <button
+                type="button"
+                onClick={() => onAddMealToToday(meal)}
+                aria-label={`Add ${meal.name} to today`}
+                title="Add to today"
+              >
+                <CalendarPlus size={18} />
+              </button>
+            )}
             <button type="button" onClick={() => onEditMeal(meal)} aria-label={`Edit ${meal.name}`} title="Edit">
               <Pencil size={18} />
             </button>
@@ -756,6 +771,19 @@ function TodayView(props: TrackerShellProps) {
   const emotionEntries = emotionEntriesForDate(props.data.emotionEntries, props.selectedDate);
   const [editingMeal, setEditingMeal] = useState<Meal | undefined>();
   const total = sumNutrition(dayMeals);
+  const today = toISODate();
+
+  async function addMealToToday(meal: Meal) {
+    await props.onSaveMeal({
+      date: today,
+      name: meal.name,
+      calories: meal.calories,
+      proteinG: meal.proteinG,
+      carbsG: meal.carbsG,
+      fatG: meal.fatG,
+      favouriteId: meal.favouriteId
+    });
+  }
 
   return (
     <>
@@ -785,7 +813,13 @@ function TodayView(props: TrackerShellProps) {
         onSaveFavourite={props.onSaveFavourite}
         isOnline={props.isOnline}
       />
-      <MealList meals={dayMeals} onEditMeal={setEditingMeal} onDeleteMeal={props.onDeleteMeal} />
+      <MealList
+        meals={dayMeals}
+        today={today}
+        onEditMeal={setEditingMeal}
+        onAddMealToToday={addMealToToday}
+        onDeleteMeal={props.onDeleteMeal}
+      />
     </>
   );
 }
