@@ -8,7 +8,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg"],
+      includeAssets: [
+        "favicon.svg",
+        "apple-touch-icon.png",
+        "pwa-192x192.png",
+        "pwa-512x512.png",
+        "maskable-icon.png"
+      ],
       manifest: {
         name: "Calorie Tracker",
         short_name: "Calories",
@@ -16,13 +22,33 @@ export default defineConfig({
         theme_color: "#f7f7f2",
         background_color: "#f7f7f2",
         display: "standalone",
-        start_url: ".",
+        scope: "/",
+        start_url: "/",
+        orientation: "portrait",
         icons: [
           {
             src: "favicon.svg",
             sizes: "any",
             type: "image/svg+xml",
             purpose: "any"
+          },
+          {
+            src: "pwa-192x192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any"
+          },
+          {
+            src: "pwa-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any"
+          },
+          {
+            src: "maskable-icon.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable"
           }
         ]
       },
